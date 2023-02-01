@@ -1,0 +1,3 @@
+-keep class com.android.rkpdapp.ProvisionerMetrics { *; }
+-keep class com.android.rkpdapp.service.** { *; }
+-keep class com.android.rkpdapp.utils.Settings { *; }

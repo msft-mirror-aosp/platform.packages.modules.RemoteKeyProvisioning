@@ -1,0 +1,15 @@
+{
+  "presubmit": [
+    {
+      "name": "RkpdAppUnitTests"
+    },
+    {
+      "name": "RkpdAppGoogleUnitTests"
+    }
+  ],
+  "mainline-presubmit": [
+    {
+      "name": "RkpdAppGoogleUnitTests[com.google.android.rkpd.apex]"
+    }
+  ]
+}
