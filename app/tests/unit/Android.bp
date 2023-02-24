@@ -18,9 +18,9 @@ package {
 android_test {
     name: "RkpdAppUnitTests",
     srcs: ["src/**/*.java"],
-    exclude_srcs: ["src/**/KeyRegisteredTest.java"],
     static_libs: [
         "Nene",
+        "RkpdAppTestUtil",
         "androidx.test.ext.junit",
         "androidx.test.core",
         "androidx.test.rules",
@@ -32,34 +32,16 @@ android_test {
         "mockito-target-extended-minus-junit4",
         "platform-test-annotations",
         "truth-prebuilt",
-        "rkpdapp-tink-prebuilt",
+        "rkpdapp-tink-prebuilt-test-only",
         "bouncycastle-unbundled",
     ],
     platform_apis: true,
-    test_config: "RkpdAppUnitTests.xml",
     test_suites: [
+        "general-tests",
         "device-tests",
         "mts-rkpd",
     ],
-    instrumentation_for: "rkpdapp",
-}
-
-// Specifically tests to see if the key is registered for the given device under test.
-android_test {
-    name: "RkpRegistrationTest",
-    srcs: ["src/**/KeyRegisteredTest.java"],
-    static_libs: [
-        "androidx.test.ext.junit",
-        "androidx.test.core",
-        "androidx.test.rules",
-        "android.security.remoteprovisioning-java",
-        "cbor-java",
-        "platform-test-annotations",
-        "truth-prebuilt",
-    ],
-    platform_apis: true,
-    test_config: "RkpRegistrationTest.xml",
-    test_suites: ["device-tests"],
+    min_sdk_version: "UpsideDownCake",
     instrumentation_for: "rkpdapp",
 }
 
@@ -67,8 +49,11 @@ android_test {
 // prebuild jar to supply that functionality.
 // Ed25519/X25519 support in conscrypt is tracked by b/214203951
 java_import {
-    name: "rkpdapp-tink-prebuilt",
+    name: "rkpdapp-tink-prebuilt-test-only",
     jars: ["tink-android-1.5.0.jar"],
     sdk_version: "module_current",
-    visibility: ["//visibility:private"],
+    visibility: [
+        ":__subpackages__",
+        "//vendor:__subpackages__",
+    ],
 }
