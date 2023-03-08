@@ -80,7 +80,7 @@ public final class RegistrationBinder extends IRegistration.Stub {
     }
 
     private void getKeyWorker(int keyId, IGetKeyCallback callback)
-            throws CborException, InterruptedException, RkpdException, RemoteException {
+            throws CborException, InterruptedException, RkpdException {
         Log.i(TAG, "Key requested for service: " + mServiceName + ", clientUid: " + mClientUid
                 + ", keyId: " + keyId + ", callback: " + callback.hashCode());
         // Use reduced look-ahead to get rid of soon-to-be expired keys, because the periodic
@@ -113,8 +113,7 @@ public final class RegistrationBinder extends IRegistration.Stub {
                 GeekResponse geekResponse = mRkpServer.fetchGeek(metrics);
                 mProvisioner.provisionKeys(metrics, mServiceName, geekResponse);
             }
-            assignedKey = mProvisionedKeyDao.getOrAssignKey(mServiceName, minExpiry, mClientUid,
-                    keyId);
+            assignedKey = tryToAssignKey(minExpiry, keyId);
         }
 
         // Now that we've gotten back from our network round-trip, it's possible an interrupt came
@@ -125,7 +124,8 @@ public final class RegistrationBinder extends IRegistration.Stub {
         if (assignedKey == null) {
             // This should never happen...
             Log.e(TAG, "Unable to provision keys");
-            checkedCallback(() -> callback.onError("Provisioning failed, no keys available"));
+            checkedCallback(() -> callback.onError(IGetKeyCallback.Error.ERROR_UNKNOWN,
+                    "Provisioning failed, no keys available"));
         } else {
             Log.i(TAG, "Key successfully assigned to client");
             RemotelyProvisionedKey key = new RemotelyProvisionedKey();
@@ -150,27 +150,30 @@ public final class RegistrationBinder extends IRegistration.Stub {
             ProvisionedKey key = mProvisionedKeyDao.getOrAssignKey(mServiceName, expiry, mClientUid,
                     keyId);
             if (key != null) {
-                provisionKeysIfNeeded();
+                provisionKeysOnKeyConsumed();
                 return key;
             }
         }
         return null;
     }
 
-    private void provisionKeysIfNeeded() {
-        if (!mProvisioner.isProvisioningNeeded(mServiceName)) {
-            return;
-        }
-
-        mThreadPool.execute(() -> {
-            try (ProvisionerMetrics metrics = ProvisionerMetrics.createKeyConsumedAttemptMetrics(
-                    mContext, mServiceName)) {
-                GeekResponse geekResponse = mRkpServer.fetchGeekAndUpdate(metrics);
-                mProvisioner.provisionKeys(metrics, mServiceName, geekResponse);
-            } catch (CborException | RemoteException | RkpdException | InterruptedException e) {
-                Log.e(TAG, "Error provisioning keys", e);
+    private void provisionKeysOnKeyConsumed() {
+        try (ProvisionerMetrics metrics = ProvisionerMetrics.createKeyConsumedAttemptMetrics(
+                mContext, mServiceName)) {
+            if (!mProvisioner.isProvisioningNeeded(metrics, mServiceName)) {
+                metrics.setStatus(ProvisionerMetrics.Status.NO_PROVISIONING_NEEDED);
+                return;
             }
-        });
+
+            mThreadPool.execute(() -> {
+                try {
+                    GeekResponse geekResponse = mRkpServer.fetchGeekAndUpdate(metrics);
+                    mProvisioner.provisionKeys(metrics, mServiceName, geekResponse);
+                } catch (CborException | RkpdException | InterruptedException e) {
+                    Log.e(TAG, "Error provisioning keys", e);
+                }
+            });
+        }
     }
 
     private void checkForCancel() throws InterruptedException {
@@ -206,18 +209,41 @@ public final class RegistrationBinder extends IRegistration.Stub {
                 } catch (InterruptedException e) {
                     Log.i(TAG, "getKey was interrupted");
                     checkedCallback(callback::onCancel);
+                } catch (RkpdException e) {
+                    Log.e(TAG, "RKPD failed to provision keys", e);
+                    checkedCallback(() -> callback.onError(mapToGetKeyError(e), e.getMessage()));
                 } catch (Exception e) {
                     // Do our best to inform the callback when the unexpected happens. Otherwise,
                     // the caller is going to wait until they timeout without knowing something like
                     // a RuntimeException occurred.
-                    Log.e(TAG, "Error provisioning keys", e);
-                    checkedCallback(() -> callback.onError(e.getMessage()));
+                    Log.e(TAG, "Unexpected error provisioning keys", e);
+                    checkedCallback(() -> callback.onError(IGetKeyCallback.Error.ERROR_UNKNOWN,
+                            e.getMessage()));
                 } finally {
                     synchronized (mTasksLock) {
                         mTasks.remove(callback);
                     }
                 }
             }));
+        }
+    }
+
+    /** Maps an RkpdException into an IGetKeyCallback.Error value. */
+    private byte mapToGetKeyError(RkpdException e) {
+        switch (e.getErrorCode()) {
+            case NO_NETWORK_CONNECTIVITY:
+                return IGetKeyCallback.Error.ERROR_PENDING_INTERNET_CONNECTIVITY;
+
+            case DEVICE_NOT_REGISTERED:
+                return IGetKeyCallback.Error.ERROR_PERMANENT;
+
+            case NETWORK_COMMUNICATION_ERROR:
+            case HTTP_CLIENT_ERROR:
+            case HTTP_SERVER_ERROR:
+            case HTTP_UNKNOWN_ERROR:
+            case INTERNAL_ERROR:
+            default:
+                return IGetKeyCallback.Error.ERROR_UNKNOWN;
         }
     }
 
