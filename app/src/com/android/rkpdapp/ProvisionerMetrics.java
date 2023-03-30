@@ -1,5 +1,5 @@
-/*
- * Copyright (C) 2023 The Android Open Source Project
+/**
+ * Copyright (C) 2022 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package com.android.rkpdapp.metrics;
+package com.android.rkpdapp;
 
 import android.content.Context;
 import android.hardware.security.keymint.IRemotelyProvisionedComponent;
@@ -25,7 +25,6 @@ import android.os.SystemProperties;
 import android.util.Log;
 
 import com.android.rkpdapp.service.RemoteProvisioningService;
-import com.android.rkpdapp.utils.StopWatch;
 
 import java.time.Duration;
 
@@ -34,7 +33,7 @@ import java.time.Duration;
  * This class will automatically push the atoms on close, and is intended to be used with a
  * try-with-resources block to ensure metrics are automatically logged on completion of an attempt.
  */
-public final class ProvisioningAttempt implements AutoCloseable {
+public final class ProvisionerMetrics implements AutoCloseable {
     // The state of remote provisioning enablement
     public enum Enablement {
         UNKNOWN,
@@ -65,21 +64,72 @@ public final class ProvisioningAttempt implements AutoCloseable {
         SIGN_CERTS_DEVICE_NOT_REGISTERED
     }
 
+    /**
+     * Restartable stopwatch class that can be used to measure multiple start->stop time
+     * intervals. All measured time intervals are summed and returned by getElapsedMillis.
+     */
+    public static class StopWatch implements AutoCloseable {
+        private long mStartTime = 0;
+        private long mElapsedTime = 0;
+
+        /** Start or resume a timer. */
+        public void start() {
+            if (isRunning()) {
+                Log.w(TAG, "Starting a timer that's already been running for "
+                        + getElapsedMillis() + "ms");
+            } else {
+                mStartTime = SystemClock.elapsedRealtime();
+            }
+        }
+
+        /** Stop recording time. */
+        public void stop() {
+            if (!isRunning()) {
+                Log.w(TAG, "Attempting to stop a timer that hasn't been started.");
+            } else {
+                mElapsedTime += SystemClock.elapsedRealtime() - mStartTime;
+                mStartTime = 0;
+            }
+        }
+
+        /** Stops the timer if it's running. */
+        @Override
+        public void close() {
+            if (isRunning()) {
+                stop();
+            }
+        }
+
+        /** Get how long the timer has been recording. */
+        public int getElapsedMillis() {
+            if (isRunning()) {
+                return (int) (mElapsedTime + SystemClock.elapsedRealtime() - mStartTime);
+            } else {
+                return (int) mElapsedTime;
+            }
+        }
+
+        /** Is the timer currently recording time? */
+        public boolean isRunning() {
+            return mStartTime != 0;
+        }
+    }
+
     private static final String TAG = RemoteProvisioningService.TAG;
 
     private final Context mContext;
     private final int mCause;
-    private final StopWatch mServerWaitTimer = new StopWatch(TAG);
-    private final StopWatch mBinderWaitTimer = new StopWatch(TAG);
-    private final StopWatch mLockWaitTimer = new StopWatch(TAG);
-    private final StopWatch mTotalTimer = new StopWatch(TAG);
+    private final StopWatch mServerWaitTimer = new StopWatch();
+    private final StopWatch mBinderWaitTimer = new StopWatch();
+    private final StopWatch mLockWaitTimer = new StopWatch();
+    private final StopWatch mTotalTimer = new StopWatch();
     private final String mRemotelyProvisionedComponent;
     private Enablement mEnablement;
     private boolean mIsKeyPoolEmpty = false;
     private Status mStatus = Status.UNKNOWN;
     private int mHttpStatusError = 0;
 
-    private ProvisioningAttempt(Context context, int cause,
+    private ProvisionerMetrics(Context context, int cause,
             String remotelyProvisionedComponent, Enablement enablement) {
         mContext = context;
         mCause = cause;
@@ -89,12 +139,12 @@ public final class ProvisioningAttempt implements AutoCloseable {
     }
 
     /** Start collecting metrics for scheduled provisioning. */
-    public static ProvisioningAttempt createScheduledAttemptMetrics(Context context) {
+    public static ProvisionerMetrics createScheduledAttemptMetrics(Context context) {
         // Scheduled jobs (PeriodicProvisioner) intermix a lot of operations for multiple
         // components, which makes it difficult to tease apart what is happening for which
         // remotely provisioned component. Thus, on these calls, the component and
         // component-specific enablement are not logged.
-        return new ProvisioningAttempt(
+        return new ProvisionerMetrics(
                 context,
                 RkpdStatsLog.REMOTE_KEY_PROVISIONING_ATTEMPT__CAUSE__SCHEDULED,
                 "",
@@ -102,9 +152,9 @@ public final class ProvisioningAttempt implements AutoCloseable {
     }
 
     /** Start collecting metrics when an attestation key has been consumed from the pool. */
-    public static ProvisioningAttempt createKeyConsumedAttemptMetrics(Context context,
+    public static ProvisionerMetrics createKeyConsumedAttemptMetrics(Context context,
             String remotelyProvisionedComponent) {
-        return new ProvisioningAttempt(
+        return new ProvisionerMetrics(
                 context,
                 RkpdStatsLog.REMOTE_KEY_PROVISIONING_ATTEMPT__CAUSE__KEY_CONSUMED,
                 remotelyProvisionedComponent,
@@ -112,9 +162,9 @@ public final class ProvisioningAttempt implements AutoCloseable {
     }
 
     /** Start collecting metrics when the spare attestation key pool is empty. */
-    public static ProvisioningAttempt createOutOfKeysAttemptMetrics(Context context,
+    public static ProvisionerMetrics createOutOfKeysAttemptMetrics(Context context,
             String remotelyProvisionedComponent) {
-        return new ProvisioningAttempt(
+        return new ProvisionerMetrics(
                 context,
                 RkpdStatsLog.REMOTE_KEY_PROVISIONING_ATTEMPT__CAUSE__OUT_OF_KEYS,
                 remotelyProvisionedComponent,

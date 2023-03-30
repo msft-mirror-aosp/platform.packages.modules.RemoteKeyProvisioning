@@ -57,11 +57,11 @@ public abstract class ProvisionedKeyDao {
     public abstract void deleteAllKeys();
 
     /**
-     * Get a count of provisioned keys for a specific IRPC that are expiring at a given Instant.
+     * Get all provisioned keys for a specific IRPC that are expiring at a given Instant.
      */
-    @Query("SELECT COUNT(*) FROM provisioned_keys"
+    @Query("SELECT * FROM provisioned_keys"
             + " WHERE expiration_time < :expiryTime AND irpc_hal = :irpcHal")
-    public abstract int getTotalExpiringKeysForIrpc(String irpcHal, Instant expiryTime);
+    public abstract List<ProvisionedKey> getExpiringKeysForIrpc(String irpcHal, Instant expiryTime);
 
     /**
      * Get provisioned keys that can be assigned to clients, factoring in an expiration time to

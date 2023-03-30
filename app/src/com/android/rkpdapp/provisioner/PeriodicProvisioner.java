@@ -25,13 +25,13 @@ import androidx.work.Worker;
 import androidx.work.WorkerParameters;
 
 import com.android.rkpdapp.GeekResponse;
+import com.android.rkpdapp.ProvisionerMetrics;
 import com.android.rkpdapp.RkpdException;
 import com.android.rkpdapp.database.ProvisionedKeyDao;
 import com.android.rkpdapp.database.RkpdDatabase;
 import com.android.rkpdapp.interfaces.ServerInterface;
 import com.android.rkpdapp.interfaces.ServiceManagerInterface;
 import com.android.rkpdapp.interfaces.SystemInterface;
-import com.android.rkpdapp.metrics.ProvisioningAttempt;
 import com.android.rkpdapp.utils.Settings;
 
 import java.time.Instant;
@@ -46,7 +46,6 @@ import co.nstant.in.cbor.CborException;
 public class PeriodicProvisioner extends Worker {
     public static final String UNIQUE_WORK_NAME = "ProvisioningJob";
     private static final String TAG = "RkpdPeriodicProvisioner";
-
     private final Context mContext;
     private final ProvisionedKeyDao mKeyDao;
 
@@ -76,7 +75,7 @@ public class PeriodicProvisioner extends Worker {
             return Result.success();
         }
 
-        try (ProvisioningAttempt metrics = ProvisioningAttempt.createScheduledAttemptMetrics(
+        try (ProvisionerMetrics metrics = ProvisionerMetrics.createScheduledAttemptMetrics(
                 mContext)) {
             // Clean up the expired keys
             mKeyDao.deleteExpiringKeys(Instant.now());
@@ -92,8 +91,8 @@ public class PeriodicProvisioner extends Worker {
 
             if (response.numExtraAttestationKeys == 0) {
                 Log.i(TAG, "Disable provisioning and delete all keys.");
-                metrics.setEnablement(ProvisioningAttempt.Enablement.DISABLED);
-                metrics.setStatus(ProvisioningAttempt.Status.PROVISIONING_DISABLED);
+                metrics.setEnablement(ProvisionerMetrics.Enablement.DISABLED);
+                metrics.setStatus(ProvisionerMetrics.Status.PROVISIONING_DISABLED);
 
                 mKeyDao.deleteAllKeys();
                 metrics.setIsKeyPoolEmpty(true);

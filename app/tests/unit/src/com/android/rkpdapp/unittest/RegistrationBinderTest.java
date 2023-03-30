@@ -32,7 +32,6 @@ import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.same;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
@@ -90,7 +89,6 @@ public class RegistrationBinderTest {
     private Provisioner mMockProvisioner;
     private ExecutorService mThreadPool;
     private RegistrationBinder mRegistration;
-    private GeekResponse mFakeGeekResponse;
 
     private static byte[] randBytes() {
         byte[] bytes = new byte[RAND.nextInt(1024)];
@@ -126,16 +124,12 @@ public class RegistrationBinderTest {
     }
 
     @Before
-    public void setUp() throws RkpdException {
+    public void setUp() {
         mContext = ApplicationProvider.getApplicationContext();
         mMockDao = mock(ProvisionedKeyDao.class);
         mRkpServer = mock(ServerInterface.class);
         mMockProvisioner = mock(Provisioner.class);
         mThreadPool = Executors.newCachedThreadPool();
-        mFakeGeekResponse = new GeekResponse();
-        doReturn(mFakeGeekResponse)
-                .when(mRkpServer)
-                .fetchGeekAndUpdate(any());
 
         SystemInterface mockSystem = mock(SystemInterface.class);
         doReturn(IRPC_HAL).when(mockSystem).getServiceName();
@@ -213,12 +207,17 @@ public class RegistrationBinderTest {
                 .when(mMockDao)
                 .getOrAssignKey(eq(IRPC_HAL), notNull(), eq(CLIENT_UID), eq(KEY_ID));
 
+        final GeekResponse fakeGeekResponse = new GeekResponse();
+        doReturn(fakeGeekResponse)
+                .when(mRkpServer)
+                .fetchGeek(any());
+
         IGetKeyCallback callback = mock(IGetKeyCallback.class);
         mRegistration.getKey(KEY_ID, callback);
         completeAllTasks();
         verify(callback).onSuccess(matches(FAKE_KEY));
         verify(callback).onProvisioningNeeded();
-        verify(mMockProvisioner).provisionKeys(any(), any(), same(mFakeGeekResponse));
+        verify(mMockProvisioner).provisionKeys(any(), any(), same(fakeGeekResponse));
         verifyNoMoreInteractions(callback);
     }
 
@@ -287,7 +286,7 @@ public class RegistrationBinderTest {
     @Test
     public void getKeyNoKeysAreProvisioned() throws Exception {
         // This test ensures that getKey will handle the case in which provisioner doesn't error
-        // out, but it also does not actually provision any keys.
+        // out, but it also does not actually provision any keys. This shouldn't ever happen.
         IGetKeyCallback callback = mock(IGetKeyCallback.class);
         mRegistration.getKey(KEY_ID, callback);
         completeAllTasks();
@@ -295,21 +294,6 @@ public class RegistrationBinderTest {
                 "Provisioning failed, no keys available");
         verify(callback).onProvisioningNeeded();
         verify(mMockProvisioner).provisionKeys(any(), any(), any());
-        verify(mRkpServer).fetchGeekAndUpdate(any());
-        verifyNoMoreInteractions(callback);
-    }
-
-    @Test
-    public void getKeyDisableProvisioningIsHonored() throws Exception {
-        mFakeGeekResponse.numExtraAttestationKeys = 0;
-        IGetKeyCallback callback = mock(IGetKeyCallback.class);
-        mRegistration.getKey(KEY_ID, callback);
-        completeAllTasks();
-        verify(callback).onError(IGetKeyCallback.Error.ERROR_UNKNOWN,
-                "Provisioning failed, no keys available");
-        verify(callback).onProvisioningNeeded();
-        verify(mRkpServer).fetchGeekAndUpdate(any());
-        verify(mMockProvisioner, never()).provisionKeys(any(), any(), any());
         verifyNoMoreInteractions(callback);
     }
 
