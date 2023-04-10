@@ -50,23 +50,22 @@ public class BootReceiver extends BroadcastReceiver {
         Constraints constraints = new Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.CONNECTED)
                 .build();
+
         PeriodicWorkRequest workRequest =
                 new PeriodicWorkRequest.Builder(PeriodicProvisioner.class, 1, TimeUnit.DAYS)
                         .setConstraints(constraints)
                         .build();
         WorkManager
                 .getInstance(context)
-                .enqueueUniquePeriodicWork("ProvisioningJob",
+                .enqueueUniquePeriodicWork(PeriodicProvisioner.UNIQUE_WORK_NAME,
                                        ExistingPeriodicWorkPolicy.UPDATE, // Replace on reboot.
                                        workRequest);
 
-        if (WidevineProvisioner.isWidevineProvisioningNeeded()) {
-            Log.i(TAG, "WV provisioning needed. Queueing a one-time provisioning job.");
-            OneTimeWorkRequest wvRequest =
-                    new OneTimeWorkRequest.Builder(WidevineProvisioner.class)
-                            .setConstraints(constraints)
-                            .build();
-            WorkManager.getInstance(context).enqueue(wvRequest);
-        }
+        Log.i(TAG, "Queueing a one-time provisioning job for widevine provisioning.");
+        OneTimeWorkRequest wvRequest = new OneTimeWorkRequest.Builder(WidevineProvisioner.class)
+                .addTag("WidevineProvisioner")
+                .setConstraints(constraints)
+                .build();
+        WorkManager.getInstance(context).enqueue(wvRequest);
     }
 }

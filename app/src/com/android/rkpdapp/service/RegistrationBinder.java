@@ -26,14 +26,20 @@ import com.android.rkpdapp.GeekResponse;
 import com.android.rkpdapp.IGetKeyCallback;
 import com.android.rkpdapp.IRegistration;
 import com.android.rkpdapp.IStoreUpgradedKeyCallback;
-import com.android.rkpdapp.ProvisionerMetrics;
 import com.android.rkpdapp.RemotelyProvisionedKey;
 import com.android.rkpdapp.RkpdException;
 import com.android.rkpdapp.database.ProvisionedKey;
 import com.android.rkpdapp.database.ProvisionedKeyDao;
 import com.android.rkpdapp.interfaces.ServerInterface;
+import com.android.rkpdapp.interfaces.SystemInterface;
+import com.android.rkpdapp.metrics.ProvisioningAttempt;
 import com.android.rkpdapp.provisioner.Provisioner;
+import com.android.rkpdapp.utils.Settings;
 
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
@@ -45,11 +51,15 @@ import co.nstant.in.cbor.CborException;
  * IRemotelyProvisionedComponent) tuple.
  */
 public final class RegistrationBinder extends IRegistration.Stub {
+    // The minimum amount of time that the registration will consider a key valid. If a key expires
+    // before this time elapses, then the key is considered too stale and will not be used.
+    public static final Duration MIN_KEY_LIFETIME = Duration.ofHours(1);
+
     static final String TAG = "RkpdRegistrationBinder";
 
     private final Context mContext;
     private final int mClientUid;
-    private final String mServiceName;
+    private final SystemInterface mSystemInterface;
     private final ProvisionedKeyDao mProvisionedKeyDao;
     private final ServerInterface mRkpServer;
     private final Provisioner mProvisioner;
@@ -58,12 +68,12 @@ public final class RegistrationBinder extends IRegistration.Stub {
     @GuardedBy("mTasksLock")
     private final HashMap<IGetKeyCallback, Future<?>> mTasks = new HashMap<>();
 
-    public RegistrationBinder(Context context, int clientUid, String irpcName,
+    public RegistrationBinder(Context context, int clientUid, SystemInterface systemInterface,
             ProvisionedKeyDao provisionedKeyDao, ServerInterface rkpServer,
             Provisioner provisioner, ExecutorService threadPool) {
         mContext = context;
         mClientUid = clientUid;
-        mServiceName = irpcName;
+        mSystemInterface = systemInterface;
         mProvisionedKeyDao = provisionedKeyDao;
         mRkpServer = rkpServer;
         mProvisioner = provisioner;
@@ -71,18 +81,24 @@ public final class RegistrationBinder extends IRegistration.Stub {
     }
 
     private void getKeyWorker(int keyId, IGetKeyCallback callback)
-            throws CborException, InterruptedException, RkpdException, RemoteException {
-        Log.i(TAG, "Key requested for service: " + mServiceName + ", clientUid: " + mClientUid
-                + ", keyId: " + keyId + ", callback: " + callback.hashCode());
+            throws CborException, InterruptedException, RkpdException {
+        Log.i(TAG, "Key requested for : " + mSystemInterface.getServiceName() + ", clientUid: "
+                + mClientUid + ", keyId: " + keyId + ", callback: " + callback.hashCode());
+        // Use reduced look-ahead to get rid of soon-to-be expired keys, because the periodic
+        // provisioner should be ensuring that old keys are already expired. However, in the
+        // edge case that periodic provisioning didn't work, we want to allow slightly "more stale"
+        // keys to be used. This reduces window of time in which key attestation is not available
+        // (e.g. if there is a provisioning server outage). Note that we must have some look-ahead,
+        // rather than using "now", else we might return a key that expires so soon that the caller
+        // can never successfully use it.
+        final Instant minExpiry = Instant.now().plus(MIN_KEY_LIFETIME);
+        mProvisionedKeyDao.deleteExpiringKeys(minExpiry);
+
         ProvisionedKey assignedKey = mProvisionedKeyDao.getKeyForClientAndIrpc(
-                mServiceName, mClientUid, keyId);
+                mSystemInterface.getServiceName(), mClientUid, keyId);
 
         if (assignedKey == null) {
-            Log.i(TAG, "No key assigned, looking for an available key");
-            assignedKey = mProvisionedKeyDao.assignKey(mServiceName, mClientUid, keyId);
-            if (assignedKey != null) {
-                provisionKeysIfNeeded();
-            }
+            assignedKey = tryToAssignKey(minExpiry, keyId);
         }
 
         if (assignedKey == null) {
@@ -93,12 +109,11 @@ public final class RegistrationBinder extends IRegistration.Stub {
 
             Log.i(TAG, "No keys are available, kicking off provisioning");
             checkedCallback(callback::onProvisioningNeeded);
-            try (ProvisionerMetrics metrics = ProvisionerMetrics.createOutOfKeysAttemptMetrics(
-                    mContext, mServiceName)) {
-                GeekResponse geekResponse = mRkpServer.fetchGeek(metrics);
-                mProvisioner.provisionKeys(metrics, mServiceName, geekResponse);
+            try (ProvisioningAttempt metrics = ProvisioningAttempt.createOutOfKeysAttemptMetrics(
+                    mContext, mSystemInterface.getServiceName())) {
+                fetchGeekAndProvisionKeys(metrics);
             }
-            assignedKey = mProvisionedKeyDao.assignKey(mServiceName, mClientUid, keyId);
+            assignedKey = tryToAssignKey(minExpiry, keyId);
         }
 
         // Now that we've gotten back from our network round-trip, it's possible an interrupt came
@@ -107,9 +122,11 @@ public final class RegistrationBinder extends IRegistration.Stub {
         checkForCancel();
 
         if (assignedKey == null) {
-            // This should never happen...
+            // This can happen if provisioning is disabled on the device for some reason,
+            // or if we're not connected to the internet.
             Log.e(TAG, "Unable to provision keys");
-            checkedCallback(() -> callback.onError("Provisioning failed, no keys available"));
+            checkedCallback(() -> callback.onError(IGetKeyCallback.Error.ERROR_UNKNOWN,
+                    "Provisioning failed, no keys available"));
         } else {
             Log.i(TAG, "Key successfully assigned to client");
             RemotelyProvisionedKey key = new RemotelyProvisionedKey();
@@ -119,20 +136,57 @@ public final class RegistrationBinder extends IRegistration.Stub {
         }
     }
 
-    private void provisionKeysIfNeeded() {
-        if (!mProvisioner.isProvisioningNeeded(mServiceName)) {
+    private void fetchGeekAndProvisionKeys(ProvisioningAttempt metrics)
+            throws CborException, RkpdException, InterruptedException {
+        GeekResponse response = mRkpServer.fetchGeekAndUpdate(metrics);
+        if (response.numExtraAttestationKeys == 0) {
+            Log.v(TAG, "Provisioning disabled.");
+            metrics.setEnablement(ProvisioningAttempt.Enablement.DISABLED);
+            metrics.setStatus(ProvisioningAttempt.Status.PROVISIONING_DISABLED);
             return;
         }
+        mProvisioner.provisionKeys(metrics, mSystemInterface, response);
+    }
 
-        mThreadPool.execute(() -> {
-            try (ProvisionerMetrics metrics = ProvisionerMetrics.createKeyConsumedAttemptMetrics(
-                    mContext, mServiceName)) {
-                GeekResponse geekResponse = mRkpServer.fetchGeekAndUpdate(metrics);
-                mProvisioner.provisionKeys(metrics, mServiceName, geekResponse);
-            } catch (CborException | RemoteException | RkpdException | InterruptedException e) {
-                Log.e(TAG, "Error provisioning keys", e);
+    private ProvisionedKey tryToAssignKey(Instant minExpiry, int keyId) {
+        // Since we're going to be assigning a fresh key to the app, we ideally want a key that's
+        // longer-lived than the minimum. We use the server-configured expiration, which is normally
+        // days, as the preferred lifetime for a key. However, if we cannot find a key that is valid
+        // for that long, we'll settle for a shorter-lived key.
+        Instant[] expirations = new Instant[]{
+                Instant.now().plus(Settings.getExpiringBy(mContext)),
+                minExpiry
+        };
+        Arrays.sort(expirations, Collections.reverseOrder());
+        for (Instant expiry : expirations) {
+            Log.i(TAG, "No key assigned, looking for an available key with expiry of " + expiry);
+            ProvisionedKey key = mProvisionedKeyDao.getOrAssignKey(
+                    mSystemInterface.getServiceName(),
+                    expiry, mClientUid, keyId);
+            if (key != null) {
+                provisionKeysOnKeyConsumed();
+                return key;
             }
-        });
+        }
+        return null;
+    }
+
+    private void provisionKeysOnKeyConsumed() {
+        try (ProvisioningAttempt metrics = ProvisioningAttempt.createKeyConsumedAttemptMetrics(
+                mContext, mSystemInterface.getServiceName())) {
+            if (!mProvisioner.isProvisioningNeeded(metrics, mSystemInterface.getServiceName())) {
+                metrics.setStatus(ProvisioningAttempt.Status.NO_PROVISIONING_NEEDED);
+                return;
+            }
+
+            mThreadPool.execute(() -> {
+                try {
+                    fetchGeekAndProvisionKeys(metrics);
+                } catch (CborException | RkpdException | InterruptedException e) {
+                    Log.e(TAG, "Error provisioning keys", e);
+                }
+            });
+        }
     }
 
     private void checkForCancel() throws InterruptedException {
@@ -168,18 +222,41 @@ public final class RegistrationBinder extends IRegistration.Stub {
                 } catch (InterruptedException e) {
                     Log.i(TAG, "getKey was interrupted");
                     checkedCallback(callback::onCancel);
+                } catch (RkpdException e) {
+                    Log.e(TAG, "RKPD failed to provision keys", e);
+                    checkedCallback(() -> callback.onError(mapToGetKeyError(e), e.getMessage()));
                 } catch (Exception e) {
                     // Do our best to inform the callback when the unexpected happens. Otherwise,
                     // the caller is going to wait until they timeout without knowing something like
                     // a RuntimeException occurred.
-                    Log.e(TAG, "Error provisioning keys", e);
-                    checkedCallback(() -> callback.onError(e.getMessage()));
+                    Log.e(TAG, "Unexpected error provisioning keys", e);
+                    checkedCallback(() -> callback.onError(IGetKeyCallback.Error.ERROR_UNKNOWN,
+                            e.getMessage()));
                 } finally {
                     synchronized (mTasksLock) {
                         mTasks.remove(callback);
                     }
                 }
             }));
+        }
+    }
+
+    /** Maps an RkpdException into an IGetKeyCallback.Error value. */
+    private byte mapToGetKeyError(RkpdException e) {
+        switch (e.getErrorCode()) {
+            case NO_NETWORK_CONNECTIVITY:
+                return IGetKeyCallback.Error.ERROR_PENDING_INTERNET_CONNECTIVITY;
+
+            case DEVICE_NOT_REGISTERED:
+                return IGetKeyCallback.Error.ERROR_PERMANENT;
+
+            case NETWORK_COMMUNICATION_ERROR:
+            case HTTP_CLIENT_ERROR:
+            case HTTP_SERVER_ERROR:
+            case HTTP_UNKNOWN_ERROR:
+            case INTERNAL_ERROR:
+            default:
+                return IGetKeyCallback.Error.ERROR_UNKNOWN;
         }
     }
 

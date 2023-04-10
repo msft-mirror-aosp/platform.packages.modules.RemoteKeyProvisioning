@@ -16,6 +16,8 @@
 
 package com.android.rkpdapp.unittest;
 
+import static com.google.common.truth.Truth.assertThat;
+
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -25,6 +27,7 @@ import android.content.Context;
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 
+import com.android.rkpdapp.testutil.SystemPropertySetter;
 import com.android.rkpdapp.utils.Settings;
 
 import org.junit.After;
@@ -57,12 +60,26 @@ public class SettingsTest {
     }
 
     @Test
+    public void testDefaultUrlEmpty() {
+        try (SystemPropertySetter ignored = SystemPropertySetter.setHostname("")) {
+            assertThat(Settings.getDefaultUrl()).isEmpty();
+        }
+    }
+
+    @Test
+    public void testDefaultUrlNonEmpty() {
+        try (SystemPropertySetter ignored = SystemPropertySetter.setHostname("your.hostname")) {
+            assertThat(Settings.getDefaultUrl()).isEqualTo("https://your.hostname/v1");
+        }
+    }
+
+    @Test
     public void testCheckDefaults() throws Exception {
         assertEquals(Settings.EXTRA_SIGNED_KEYS_AVAILABLE_DEFAULT,
                      Settings.getExtraSignedKeysAvailable(sContext));
         assertEquals(Settings.EXPIRING_BY_MS_DEFAULT,
                      Settings.getExpiringBy(sContext).toMillis());
-        assertEquals(Settings.URL_DEFAULT,
+        assertEquals(Settings.getDefaultUrl(),
                      Settings.getUrl(sContext));
         assertEquals(0, Settings.getFailureCounter(sContext));
     }
@@ -94,7 +111,7 @@ public class SettingsTest {
                      Settings.getExtraSignedKeysAvailable(sContext));
         assertEquals(Settings.EXPIRING_BY_MS_DEFAULT,
                      Settings.getExpiringBy(sContext).toMillis());
-        assertEquals(Settings.URL_DEFAULT,
+        assertEquals(Settings.getDefaultUrl(),
                      Settings.getUrl(sContext));
         assertEquals(0, Settings.getFailureCounter(sContext));
     }

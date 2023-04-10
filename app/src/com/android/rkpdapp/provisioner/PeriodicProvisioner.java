@@ -18,19 +18,21 @@ package com.android.rkpdapp.provisioner;
 
 import android.annotation.NonNull;
 import android.content.Context;
-import android.os.RemoteException;
 import android.util.Log;
 
+import androidx.work.WorkManager;
 import androidx.work.Worker;
 import androidx.work.WorkerParameters;
 
 import com.android.rkpdapp.GeekResponse;
-import com.android.rkpdapp.ProvisionerMetrics;
 import com.android.rkpdapp.RkpdException;
 import com.android.rkpdapp.database.ProvisionedKeyDao;
 import com.android.rkpdapp.database.RkpdDatabase;
 import com.android.rkpdapp.interfaces.ServerInterface;
 import com.android.rkpdapp.interfaces.ServiceManagerInterface;
+import com.android.rkpdapp.interfaces.SystemInterface;
+import com.android.rkpdapp.metrics.ProvisioningAttempt;
+import com.android.rkpdapp.utils.Settings;
 
 import java.time.Instant;
 
@@ -42,7 +44,9 @@ import co.nstant.in.cbor.CborException;
  * drive that process.
  */
 public class PeriodicProvisioner extends Worker {
+    public static final String UNIQUE_WORK_NAME = "ProvisioningJob";
     private static final String TAG = "RkpdPeriodicProvisioner";
+
     private final Context mContext;
     private final ProvisionedKeyDao mKeyDao;
 
@@ -58,36 +62,61 @@ public class PeriodicProvisioner extends Worker {
     @Override
     public Result doWork() {
         Log.i(TAG, "Waking up; checking provisioning state.");
-        try (ProvisionerMetrics metrics = ProvisionerMetrics.createScheduledAttemptMetrics(
+
+        SystemInterface[] irpcs = ServiceManagerInterface.getAllInstances();
+        if (irpcs.length == 0) {
+            Log.i(TAG, "Stopping periodic provisioner: there are no IRPC HALs");
+            WorkManager.getInstance(mContext).cancelWorkById(getId());
+            return Result.success();
+        }
+
+        if (Settings.getDefaultUrl().isEmpty()) {
+            Log.i(TAG, "Stopping periodic provisioner: system has no configured server endpoint");
+            WorkManager.getInstance(mContext).cancelWorkById(getId());
+            return Result.success();
+        }
+
+        try (ProvisioningAttempt metrics = ProvisioningAttempt.createScheduledAttemptMetrics(
                 mContext)) {
             // Clean up the expired keys
             mKeyDao.deleteExpiringKeys(Instant.now());
 
             // Fetch geek from the server and figure out whether provisioning needs to be stopped.
-            GeekResponse response = new ServerInterface(mContext).fetchGeekAndUpdate(metrics);
+            GeekResponse response;
+            try {
+                response = new ServerInterface(mContext).fetchGeekAndUpdate(metrics);
+            } catch (RkpdException e) {
+                Log.e(TAG, "Error fetching configuration from the RKP server", e);
+                return Result.failure();
+            }
+
             if (response.numExtraAttestationKeys == 0) {
                 Log.i(TAG, "Disable provisioning and delete all keys.");
-                metrics.setEnablement(ProvisionerMetrics.Enablement.DISABLED);
-                metrics.setStatus(ProvisionerMetrics.Status.PROVISIONING_DISABLED);
+                metrics.setEnablement(ProvisioningAttempt.Enablement.DISABLED);
+                metrics.setStatus(ProvisioningAttempt.Status.PROVISIONING_DISABLED);
 
                 mKeyDao.deleteAllKeys();
+                metrics.setIsKeyPoolEmpty(true);
                 return Result.success();
             }
 
-            // Figure out each of the IRPCs and get SystemInterface instance for each.
-            String[] serviceNames = ServiceManagerInterface.getDeclaredInstances();
-            Log.i(TAG, "Total services found implementing IRPC: " + serviceNames.length);
+            Log.i(TAG, "Total services found implementing IRPC: " + irpcs.length);
             Provisioner provisioner = new Provisioner(mContext, mKeyDao);
-            for (String serviceName: serviceNames) {
-                Log.i(TAG, "Starting provisioning for " + serviceName);
-                provisioner.provisionKeys(metrics, serviceName, response);
+            Result result = Result.success();
+            for (SystemInterface irpc : irpcs) {
+                Log.i(TAG, "Starting provisioning for " + irpc);
+                try {
+                    provisioner.provisionKeys(metrics, irpc, response);
+                    Log.i(TAG, "Successfully provisioned " + irpc);
+                } catch (CborException e) {
+                    Log.e(TAG, "Error parsing CBOR for " + irpc, e);
+                    result = Result.failure();
+                } catch (InterruptedException | RkpdException e) {
+                    Log.e(TAG, "Error provisioning keys for " + irpc, e);
+                    result = Result.failure();
+                }
             }
-            Log.i(TAG, "Periodic provisioning completed.");
-            metrics.setStatus(ProvisionerMetrics.Status.KEYS_SUCCESSFULLY_PROVISIONED);
-            return Result.success();
-        } catch (RemoteException | CborException | RkpdException | InterruptedException e) {
-            Log.e(TAG, "Some issue when running rkpd.", e);
+            return result;
         }
-        return Result.failure();
     }
 }
