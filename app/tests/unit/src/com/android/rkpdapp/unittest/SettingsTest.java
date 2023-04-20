@@ -16,6 +16,8 @@
 
 package com.android.rkpdapp.unittest;
 
+import static com.google.common.truth.Truth.assertThat;
+
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -25,6 +27,7 @@ import android.content.Context;
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 
+import com.android.rkpdapp.testutil.SystemPropertySetter;
 import com.android.rkpdapp.utils.Settings;
 
 import org.junit.After;
@@ -54,6 +57,20 @@ public class SettingsTest {
     @After
     public void tearDown() {
         Settings.clearPreferences(sContext);
+    }
+
+    @Test
+    public void testDefaultUrlEmpty() {
+        try (SystemPropertySetter ignored = SystemPropertySetter.setHostname("")) {
+            assertThat(Settings.getDefaultUrl()).isEmpty();
+        }
+    }
+
+    @Test
+    public void testDefaultUrlNonEmpty() {
+        try (SystemPropertySetter ignored = SystemPropertySetter.setHostname("your.hostname")) {
+            assertThat(Settings.getDefaultUrl()).isEqualTo("https://your.hostname/v1");
+        }
     }
 
     @Test
@@ -89,6 +106,7 @@ public class SettingsTest {
         assertTrue("Method did not return true on write.",
                    Settings.setDeviceConfig(sContext, extraKeys, expiringBy, url));
         Settings.incrementFailureCounter(sContext);
+        Settings.setMaxRequestTime(sContext, 100);
         Settings.resetDefaultConfig(sContext);
         assertEquals(Settings.EXTRA_SIGNED_KEYS_AVAILABLE_DEFAULT,
                      Settings.getExtraSignedKeysAvailable(sContext));
@@ -97,6 +115,7 @@ public class SettingsTest {
         assertEquals(Settings.getDefaultUrl(),
                      Settings.getUrl(sContext));
         assertEquals(0, Settings.getFailureCounter(sContext));
+        assertEquals(20000, Settings.getMaxRequestTime(sContext));
     }
 
     @Test
@@ -187,5 +206,12 @@ public class SettingsTest {
         assertTrue(Settings.hasErrDataBudget(sContext, null));
         Settings.consumeErrDataBudget(sContext, 1);
         assertFalse(Settings.hasErrDataBudget(sContext, null));
+    }
+
+    @Test
+    public void testServerTimeoutSetting() {
+        assertEquals(20000, Settings.getMaxRequestTime(sContext));
+        Settings.setMaxRequestTime(sContext, 100);
+        assertEquals(100, Settings.getMaxRequestTime(sContext));
     }
 }
