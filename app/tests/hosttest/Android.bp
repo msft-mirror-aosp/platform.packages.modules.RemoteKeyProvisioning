@@ -15,23 +15,26 @@ package {
     default_applicable_licenses: ["Android-Apache-2.0"],
 }
 
-android_test {
-    name: "RkpdAppStressTests",
+java_test_host {
+    name: "RkpdAppHostTests",
     srcs: ["src/**/*.java"],
-    static_libs: [
-        "Nene",
-        "androidx.test.ext.junit",
-        "androidx.test.core",
-        "androidx.test.rules",
-        "platform-test-annotations",
-        "truth-prebuilt",
-    ],
-    platform_apis: true,
     test_suites: [
         "general-tests",
         "device-tests",
-        "mts-rkpd",
     ],
-    min_sdk_version: "UpsideDownCake",
-    instrumentation_for: "rkpdapp",
+    libs: [
+        "compatibility-host-util",
+        "core_cts_test_resources",
+        "cts-tradefed",
+        "host-libprotobuf-java-full",
+        "platformprotos",
+        "tradefed",
+        "truth-prebuilt",
+    ],
+    static_libs: [
+        "cts-statsd-atom-host-test-utils",
+    ],
+    data: [
+        ":RkpdAppIntegrationTests",
+    ],
 }

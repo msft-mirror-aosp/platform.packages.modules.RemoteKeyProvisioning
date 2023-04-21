@@ -178,16 +178,33 @@ public class RkpdDatabaseTest {
     }
 
     @Test
-    public void testGetExpiringKeysForIrpc() {
-        mProvisionedKey1.expirationTime = Instant.now().minus(1000, ChronoUnit.MINUTES);
-        mProvisionedKey2.expirationTime = Instant.now().plus(1000, ChronoUnit.MINUTES);
-        ProvisionedKey key3 = new ProvisionedKey(TEST_KEY_BLOB_3, TEST_HAL_2, TEST_KEY_BLOB_3,
-                TEST_KEY_BLOB_3, Instant.now().minus(1000, ChronoUnit.MINUTES));
-        mKeyDao.insertKeys(List.of(mProvisionedKey1, mProvisionedKey2, key3));
+    public void testGetTotalExpiringKeysForIrpc() {
+        final Instant past = Instant.now().minus(1000, ChronoUnit.MINUTES);
+        final Instant future = Instant.now().plus(1000, ChronoUnit.MINUTES);
 
-        List<ProvisionedKey> expiringKeys =
-                mKeyDao.getExpiringKeysForIrpc(TEST_HAL_1, Instant.now());
-        assertThat(expiringKeys).containsExactly(mProvisionedKey1);
+        ProvisionedKey key1 = new ProvisionedKey(TEST_KEY_BLOB_1, TEST_HAL_1, TEST_KEY_BLOB_1,
+                TEST_KEY_BLOB_1, past);
+        ProvisionedKey key2 = new ProvisionedKey(TEST_KEY_BLOB_2, TEST_HAL_1, TEST_KEY_BLOB_2,
+                TEST_KEY_BLOB_2, future);
+        ProvisionedKey key3 = new ProvisionedKey(TEST_KEY_BLOB_3, TEST_HAL_2, TEST_KEY_BLOB_3,
+                TEST_KEY_BLOB_3, past);
+        mKeyDao.insertKeys(List.of(key1, key2, key3));
+
+        assertThat(mKeyDao.getTotalExpiringKeysForIrpc(TEST_HAL_1, past)).isEqualTo(0);
+        assertThat(mKeyDao.getTotalExpiringKeysForIrpc(TEST_HAL_2, past)).isEqualTo(0);
+
+        assertThat(mKeyDao.getTotalExpiringKeysForIrpc(TEST_HAL_1, past.plusMillis(1)))
+                .isEqualTo(1);
+        assertThat(mKeyDao.getTotalExpiringKeysForIrpc(TEST_HAL_2, past.plusMillis(1)))
+                .isEqualTo(1);
+
+        assertThat(mKeyDao.getTotalExpiringKeysForIrpc(TEST_HAL_1, future)).isEqualTo(1);
+        assertThat(mKeyDao.getTotalExpiringKeysForIrpc(TEST_HAL_2, future)).isEqualTo(1);
+
+        assertThat(mKeyDao.getTotalExpiringKeysForIrpc(TEST_HAL_1, future.plusMillis(1)))
+                .isEqualTo(2);
+        assertThat(mKeyDao.getTotalExpiringKeysForIrpc(TEST_HAL_2, future.plusMillis(1)))
+                .isEqualTo(1);
     }
 
     @Test
@@ -213,20 +230,43 @@ public class RkpdDatabaseTest {
 
     @Test
     public void testUpgradeKeyBlob() {
+        mProvisionedKey1.keyId = FAKE_KEY_ID;
+        mProvisionedKey1.clientUid = FAKE_CLIENT_UID;
         mKeyDao.insertKeys(List.of(mProvisionedKey1));
 
         ProvisionedKey databaseKey = mTestDao.getAllKeys().get(0);
         assertThat(databaseKey.keyBlob).isEqualTo(TEST_KEY_BLOB_1);
+        assertThat(mKeyDao.upgradeKeyBlob(FAKE_CLIENT_UID_2, TEST_KEY_BLOB_1, TEST_KEY_BLOB_2))
+                .isEqualTo(0);
+        assertThat(mKeyDao.upgradeKeyBlob(FAKE_CLIENT_UID, TEST_KEY_BLOB_1, TEST_KEY_BLOB_2))
+                .isEqualTo(1);
 
-        assertThat(mKeyDao.upgradeKeyBlob(TEST_KEY_BLOB_1, TEST_KEY_BLOB_2)).isEqualTo(1);
         databaseKey = mTestDao.getAllKeys().get(0);
         assertThat(databaseKey.keyBlob).isEqualTo(TEST_KEY_BLOB_2);
     }
 
     @Test
-    public void testUpgradeNonExistentKeyBlob() {
+    public void testCorrectClientUpgradesKeyBlob() {
+        mProvisionedKey1.keyId = FAKE_KEY_ID;
+        mProvisionedKey1.clientUid = FAKE_CLIENT_UID;
         mKeyDao.insertKeys(List.of(mProvisionedKey1));
-        assertThat(mKeyDao.upgradeKeyBlob(TEST_KEY_BLOB_2, TEST_KEY_BLOB_3)).isEqualTo(0);
+
+        ProvisionedKey databaseKey = mTestDao.getAllKeys().get(0);
+        assertThat(databaseKey.keyBlob).isEqualTo(TEST_KEY_BLOB_1);
+        assertThat(mKeyDao.upgradeKeyBlob(FAKE_CLIENT_UID_2, TEST_KEY_BLOB_1, TEST_KEY_BLOB_2))
+                .isEqualTo(0);
+
+        databaseKey = mTestDao.getAllKeys().get(0);
+        assertThat(databaseKey.keyBlob).isEqualTo(TEST_KEY_BLOB_1);
+    }
+
+    @Test
+    public void testUpgradeNonExistentKeyBlob() {
+        mProvisionedKey1.keyId = FAKE_KEY_ID;
+        mProvisionedKey1.clientUid = FAKE_CLIENT_UID;
+        mKeyDao.insertKeys(List.of(mProvisionedKey1));
+        assertThat(mKeyDao.upgradeKeyBlob(FAKE_CLIENT_UID, TEST_KEY_BLOB_2, TEST_KEY_BLOB_3))
+                .isEqualTo(0);
     }
 
     @Test
@@ -292,10 +332,12 @@ public class RkpdDatabaseTest {
 
     @Test
     public void testUpgradeWithNullKeyBlob() {
+        mProvisionedKey1.keyId = FAKE_KEY_ID;
+        mProvisionedKey1.clientUid = FAKE_CLIENT_UID;
         mKeyDao.insertKeys(List.of(mProvisionedKey1));
 
         try {
-            mKeyDao.upgradeKeyBlob(TEST_KEY_BLOB_1, null);
+            mKeyDao.upgradeKeyBlob(FAKE_CLIENT_UID, TEST_KEY_BLOB_1, null);
             fail("UpgradeKeyBlob should fail for null keyblob.");
         } catch (SQLiteConstraintException ex) {
             assertThat(ex).hasMessageThat().contains("NOT NULL constraint failed");
@@ -304,10 +346,14 @@ public class RkpdDatabaseTest {
 
     @Test
     public void testUpgradeWithDuplicateKeyBlob() {
+        mProvisionedKey1.keyId = FAKE_KEY_ID;
+        mProvisionedKey1.clientUid = FAKE_CLIENT_UID;
+        mProvisionedKey2.keyId = FAKE_KEY_ID_2;
+        mProvisionedKey2.clientUid = FAKE_CLIENT_UID;
         mKeyDao.insertKeys(List.of(mProvisionedKey1, mProvisionedKey2));
 
         try {
-            mKeyDao.upgradeKeyBlob(TEST_KEY_BLOB_1, TEST_KEY_BLOB_2);
+            mKeyDao.upgradeKeyBlob(FAKE_CLIENT_UID, TEST_KEY_BLOB_1, TEST_KEY_BLOB_2);
             fail("UpgradeKeyBlob should fail for duplicate keyblob.");
         } catch (SQLiteConstraintException ex) {
             assertThat(ex).hasMessageThat().contains("UNIQUE constraint failed");
