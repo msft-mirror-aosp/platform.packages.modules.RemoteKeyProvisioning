@@ -15,23 +15,13 @@ package {
     default_applicable_licenses: ["Android-Apache-2.0"],
 }
 
-android_test {
-    name: "RkpdAppStressTests",
-    srcs: ["src/**/*.java"],
+java_binary {
+    name: "RkpRegistrationCheck",
+    srcs: ["src/**/RkpRegistrationCheck.java"],
     static_libs: [
-        "Nene",
-        "androidx.test.ext.junit",
-        "androidx.test.core",
-        "androidx.test.rules",
-        "platform-test-annotations",
-        "truth-prebuilt",
+        "android.hardware.security.rkp-V3-java",
+        "cbor-java",
     ],
+    main_class: "com.android.rkpdapp.RkpRegistrationCheck",
     platform_apis: true,
-    test_suites: [
-        "general-tests",
-        "device-tests",
-        "mts-rkpd",
-    ],
-    min_sdk_version: "UpsideDownCake",
-    instrumentation_for: "rkpdapp",
 }
