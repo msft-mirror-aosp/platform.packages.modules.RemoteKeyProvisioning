@@ -19,26 +19,18 @@ package com.android.rkpdapp.unittest;
 import static com.google.common.truth.Truth.assertThat;
 import static com.google.common.truth.Truth.assertWithMessage;
 
-import static org.junit.Assert.fail;
-
-import android.Manifest;
 import android.content.Context;
-import android.content.pm.PackageManager;
 import android.net.ConnectivityManager;
-import android.net.EthernetManager;
 import android.net.NetworkInfo;
-import android.security.NetworkSecurityPolicy;
 import android.util.Base64;
-import android.util.Log;
 
 import androidx.test.core.app.ApplicationProvider;
 
-import com.android.bedstead.nene.TestApis;
-import com.android.bedstead.nene.permissions.PermissionContext;
 import com.android.rkpdapp.GeekResponse;
-import com.android.rkpdapp.ProvisionerMetrics;
 import com.android.rkpdapp.RkpdException;
 import com.android.rkpdapp.interfaces.ServerInterface;
+import com.android.rkpdapp.metrics.ProvisioningAttempt;
+import com.android.rkpdapp.testutil.FakeRkpServer;
 import com.android.rkpdapp.utils.CborUtils;
 import com.android.rkpdapp.utils.Settings;
 
@@ -54,182 +46,163 @@ import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.Arrays;
 import java.util.List;
 
-import fi.iki.elonen.NanoHTTPD;
-
 public class ServerInterfaceTest {
-    private static final String TAG = "RkpdServerInterfaceTest";
     private static final Duration TIME_TO_REFRESH_HOURS = Duration.ofHours(2);
-    private static final byte[] GEEK_RESPONSE = Base64.decode(
-            "g4KCAYOEQ6EBJqBYTaUBAgMmIAEhWCD3FIrbl/TMU+/SZBHE43UfZh+kcQxsz/oJRoB0h1TyrSJY"
-                    + "IF5/W/bs5PYZzP8TN/0PociT2xgGdsRd5tdqd4bDLa+PWEAvl45C+74HLZVHhUeTQLAf1JtHpMRE"
-                    + "qfKhB4cQx5/LEfS/n+g74Oc0TBX8e8N+MwX00TQ87QIEYHoV4HnTiv8khEOhASagWE2lAQIDJiAB"
-                    + "IVggUYCsz4+WjOwPUOGpG7eQhjSL48OsZQJNtPYxDghGMjkiWCBU65Sd/ra05HM6JU4vH52dvfpm"
-                    + "wRGL6ZaMQ+Qw9tp2q1hAmDj7NDpl23OYsSeiFXTyvgbnjSJO3fC/wgF0xLcpayQctdjSZvpE7/Uw"
-                    + "LAR07ejGYNrOn1ZXJ3Qh096Tj+O4zYRDoQEmoFhxpgECAlggg5/4/RAcEp+SQcdbjeRO9BkTmscb"
-                    + "bacOlfJkU12nHcEDOBggASFYIBakUhJjs4ZWUNjf8qCofbzZbqdoYOqMXPGT5ZcZDazeIlggib7M"
-                    + "bD9esDk0r5e6ONEWHaHMHWTTjEhO+HKBGzs+Me5YQPrazy2rpTAMc8Xlq0mSWWBE+sTyM+UEsmwZ"
-                    + "ZOkc42Q7NIYAZS313a+qAcmvg8lO+FqU6GWTUeMYHjmAp2lLM82CAoOEQ6EBJ6BYKqQBAQMnIAYh"
-                    + "WCCZue7dXuRS9oXGTGLcPmGrV0h9dTcprXaAMtKzy2NY2VhAHiIIS6S3pMjXTgMO/rivFEynO2+l"
-                    + "zdzaecYrZP6ZOa9254D6ZgCFDQeYKqyRXKclFEkGNHXKiid62eNaSesCA4RDoQEnoFgqpAEBAycg"
-                    + "BiFYIOovhQ6eagxc973Z+igyv9pV6SCiUQPJA5MYzqAVKezRWECCa8ddpjZXt8dxEq0cwmqzLCMq"
-                    + "3RQwy4IUtonF0x4xu7hQIUpJTbqRDG8zTYO8WCsuhNvFWQ+YYeLB6ony0K4EhEOhASegWE6lAQEC"
-                    + "WCBvktEEbXHYp46I2NFWgV+W0XiD5jAbh+2/INFKO/5qLgM4GCAEIVggtl0cS5qDOp21FVk3oSb7"
-                    + "D9/nnKwB1aTsyDopAIhYJTlYQICyn9Aynp1K/rAl8sLSImhGxiCwqugWrGShRYObzElUJX+rFgVT"
-                    + "8L01k/PGu1lOXvneIQcUo7ako4uPgpaWugNYHQAAAYBINcxrASC0rWP9VTSO7LdABvcdkv7W2vh+"
-                    + "onV0aW1lX3RvX3JlZnJlc2hfaG91cnMYSHgabnVtX2V4dHJhX2F0dGVzdGF0aW9uX2tleXMU",
-            Base64.DEFAULT);
-
-    // Same as GEEK_RESPONSE, but the "num_extra_attestation_keys" value is 0, disabling RKP.
-    private static final byte[] GEEK_RESPONSE_RKP_DISABLED = Base64.decode(
-            "g4KCAYOEQ6EBJqBYTaUBAgMmIAEhWCD3FIrbl/TMU+/SZBHE43UfZh+kcQxsz/oJRoB0h1TyrSJY"
-                    + "IF5/W/bs5PYZzP8TN/0PociT2xgGdsRd5tdqd4bDLa+PWEAvl45C+74HLZVHhUeTQLAf1JtHpMRE"
-                    + "qfKhB4cQx5/LEfS/n+g74Oc0TBX8e8N+MwX00TQ87QIEYHoV4HnTiv8khEOhASagWE2lAQIDJiAB"
-                    + "IVggUYCsz4+WjOwPUOGpG7eQhjSL48OsZQJNtPYxDghGMjkiWCBU65Sd/ra05HM6JU4vH52dvfpm"
-                    + "wRGL6ZaMQ+Qw9tp2q1hAmDj7NDpl23OYsSeiFXTyvgbnjSJO3fC/wgF0xLcpayQctdjSZvpE7/Uw"
-                    + "LAR07ejGYNrOn1ZXJ3Qh096Tj+O4zYRDoQEmoFhxpgECAlggg5/4/RAcEp+SQcdbjeRO9BkTmscb"
-                    + "bacOlfJkU12nHcEDOBggASFYIBakUhJjs4ZWUNjf8qCofbzZbqdoYOqMXPGT5ZcZDazeIlggib7M"
-                    + "bD9esDk0r5e6ONEWHaHMHWTTjEhO+HKBGzs+Me5YQPrazy2rpTAMc8Xlq0mSWWBE+sTyM+UEsmwZ"
-                    + "ZOkc42Q7NIYAZS313a+qAcmvg8lO+FqU6GWTUeMYHjmAp2lLM82CAoOEQ6EBJ6BYKqQBAQMnIAYh"
-                    + "WCCZue7dXuRS9oXGTGLcPmGrV0h9dTcprXaAMtKzy2NY2VhAHiIIS6S3pMjXTgMO/rivFEynO2+l"
-                    + "zdzaecYrZP6ZOa9254D6ZgCFDQeYKqyRXKclFEkGNHXKiid62eNaSesCA4RDoQEnoFgqpAEBAycg"
-                    + "BiFYIOovhQ6eagxc973Z+igyv9pV6SCiUQPJA5MYzqAVKezRWECCa8ddpjZXt8dxEq0cwmqzLCMq"
-                    + "3RQwy4IUtonF0x4xu7hQIUpJTbqRDG8zTYO8WCsuhNvFWQ+YYeLB6ony0K4EhEOhASegWE6lAQEC"
-                    + "WCBvktEEbXHYp46I2NFWgV+W0XiD5jAbh+2/INFKO/5qLgM4GCAEIVggtl0cS5qDOp21FVk3oSb7"
-                    + "D9/nnKwB1aTsyDopAIhYJTlYQICyn9Aynp1K/rAl8sLSImhGxiCwqugWrGShRYObzElUJX+rFgVT"
-                    + "8L01k/PGu1lOXvneIQcUo7ako4uPgpaWugNYHQAAAYBINcxrASC0rWP9VTSO7LdABvcdkv7W2vh+"
-                    + "onV0aW1lX3RvX3JlZnJlc2hfaG91cnMYSHgabnVtX2V4dHJhX2F0dGVzdGF0aW9uX2tleXMA",
-            Base64.DEFAULT);
-
     private static Context sContext;
     private ServerInterface mServerInterface;
-    private boolean mCleartextPolicy;
 
     @BeforeClass
     public static void init() {
-        sContext = ApplicationProvider.getApplicationContext();
+        sContext = Mockito.spy(ApplicationProvider.getApplicationContext());
     }
 
     @Before
     public void setUp() {
         Settings.clearPreferences(sContext);
         mServerInterface = new ServerInterface(sContext);
-        mCleartextPolicy =
-                NetworkSecurityPolicy.getInstance().isCleartextTrafficPermitted();
-        NetworkSecurityPolicy.getInstance().setCleartextTrafficPermitted(true);
     }
 
     @After
     public void tearDown() {
         Settings.clearPreferences(sContext);
-        NetworkSecurityPolicy.getInstance().setCleartextTrafficPermitted(mCleartextPolicy);
+        Mockito.reset(sContext);
     }
 
     @Test
-    public void testFetchGeekRkpDisabled() throws IOException, RkpdException {
-        final String url = setupServerAndGetUrl(GEEK_RESPONSE_RKP_DISABLED,
-                HttpResponse.HTTP_OK_VALID_CBOR);
-        Settings.setDeviceConfig(sContext, 1 /* extraKeys */,
-                TIME_TO_REFRESH_HOURS /* expiringBy */, url);
-        GeekResponse response = mServerInterface.fetchGeek(
-                ProvisionerMetrics.createScheduledAttemptMetrics(sContext));
-
-        assertThat(response.numExtraAttestationKeys).isEqualTo(0);
-        assertThat(response.getChallenge()).isNotNull();
-        assertThat(response.getGeekChain(2)).isNotNull();
+    public void testRetryOnServerFailure() throws Exception {
+        try (FakeRkpServer server = new FakeRkpServer(FakeRkpServer.Response.INTERNAL_ERROR,
+                FakeRkpServer.Response.INTERNAL_ERROR)) {
+            Settings.setDeviceConfig(sContext, 1 /* extraKeys */,
+                    TIME_TO_REFRESH_HOURS /* expiringBy */, server.getUrl());
+            Settings.setMaxRequestTime(sContext, 100);
+            GeekResponse ignored = mServerInterface.fetchGeek(
+                    ProvisioningAttempt.createScheduledAttemptMetrics(sContext));
+            assertWithMessage("Expected RkpdException.").fail();
+        } catch (RkpdException e) {
+            // should throw this
+        }
     }
 
     @Test
-    public void testFetchGeekRkpEnabled() throws IOException, RkpdException {
-        final String url = setupServerAndGetUrl(GEEK_RESPONSE,
-                HttpResponse.HTTP_OK_VALID_CBOR);
-        Settings.setDeviceConfig(sContext, 1 /* extraKeys */,
-                TIME_TO_REFRESH_HOURS /* expiringBy */, url);
-        GeekResponse response = mServerInterface.fetchGeek(
-                ProvisionerMetrics.createScheduledAttemptMetrics(sContext));
+    public void testFetchGeekRkpDisabled() throws Exception {
+        try (FakeRkpServer server = new FakeRkpServer(
+                FakeRkpServer.Response.FETCH_EEK_RKP_DISABLED,
+                FakeRkpServer.Response.INTERNAL_ERROR)) {
+            Settings.setDeviceConfig(sContext, 1 /* extraKeys */,
+                    TIME_TO_REFRESH_HOURS /* expiringBy */, server.getUrl());
+            GeekResponse response = mServerInterface.fetchGeek(
+                    ProvisioningAttempt.createScheduledAttemptMetrics(sContext));
 
-        assertThat(response.numExtraAttestationKeys).isEqualTo(20);
-        assertThat(response.getChallenge()).isNotNull();
-        byte[] challenge = Base64.decode("AAABgEg1zGsBILStY/1VNI7st0AG9x2S/tba+H4=",
-                Base64.DEFAULT);
-        assertThat(response.getChallenge()).isEqualTo(challenge);
-        byte[] ed25519GeekChain = Base64.decode("g4RDoQEnoFgqpAEBAycgBiFYIJm57t1e5FL2hcZMYtw+YatXS"
-                + "H11NymtdoAy0rPLY1jZWEAeIghLpLekyNdOAw7+uK8UTKc7b6XN3Np5xitk/pk5r3bngPpmAIUNB5gq"
-                + "rJFcpyUUSQY0dcqKJ3rZ41pJ6wIDhEOhASegWCqkAQEDJyAGIVgg6i+FDp5qDFz3vdn6KDK/2lXpIKJ"
-                + "RA8kDkxjOoBUp7NFYQIJrx12mNle3x3ESrRzCarMsIyrdFDDLghS2icXTHjG7uFAhSklNupEMbzNNg7"
-                + "xYKy6E28VZD5hh4sHqifLQrgSEQ6EBJ6BYTqUBAQJYIG+S0QRtcdinjojY0VaBX5bReIPmMBuH7b8g0"
-                + "Uo7/mouAzgYIAQhWCC2XRxLmoM6nbUVWTehJvsP3+ecrAHVpOzIOikAiFglOVhAgLKf0DKenUr+sCXy"
-                + "wtIiaEbGILCq6BasZKFFg5vMSVQlf6sWBVPwvTWT88a7WU5e+d4hBxSjtqSji4+Clpa6Aw==",
-                Base64.DEFAULT);
-        byte[] p256GeekChain = Base64.decode("g4RDoQEmoFhNpQECAyYgASFYIPcUituX9MxT79JkEcTjdR9mH6Rx"
-                + "DGzP+glGgHSHVPKtIlggXn9b9uzk9hnM/xM3/Q+hyJPbGAZ2xF3m12p3hsMtr49YQC+XjkL7vgctlUe"
-                + "FR5NAsB/Um0ekxESp8qEHhxDHn8sR9L+f6Dvg5zRMFfx7w34zBfTRNDztAgRgehXgedOK/ySEQ6EBJq"
-                + "BYTaUBAgMmIAEhWCBRgKzPj5aM7A9Q4akbt5CGNIvjw6xlAk209jEOCEYyOSJYIFTrlJ3+trTkczolT"
-                + "i8fnZ29+mbBEYvploxD5DD22narWECYOPs0OmXbc5ixJ6IVdPK+BueNIk7d8L/CAXTEtylrJBy12NJm"
-                + "+kTv9TAsBHTt6MZg2s6fVlcndCHT3pOP47jNhEOhASagWHGmAQICWCCDn/j9EBwSn5JBx1uN5E70GRO"
-                + "axxttpw6V8mRTXacdwQM4GCABIVggFqRSEmOzhlZQ2N/yoKh9vNlup2hg6oxc8ZPllxkNrN4iWCCJvs"
-                + "xsP16wOTSvl7o40RYdocwdZNOMSE74coEbOz4x7lhA+trPLaulMAxzxeWrSZJZYET6xPIz5QSybBlk6"
-                + "RzjZDs0hgBlLfXdr6oBya+DyU74WpToZZNR4xgeOYCnaUszzQ==",
-                Base64.DEFAULT);
-        assertThat(response.getGeekChain(CborUtils.EC_CURVE_25519)).isEqualTo(ed25519GeekChain);
-        assertThat(response.getGeekChain(CborUtils.EC_CURVE_P256)).isEqualTo(p256GeekChain);
+            assertThat(response.numExtraAttestationKeys).isEqualTo(0);
+            assertThat(response.getChallenge()).isNotNull();
+            assertThat(response.getGeekChain(2)).isNotNull();
+        }
     }
 
     @Test
-    public void testFetchKeyAndUpdate() throws IOException, RkpdException {
-        final String url = setupServerAndGetUrl(GEEK_RESPONSE,
-                HttpResponse.HTTP_OK_VALID_CBOR);
-        Settings.setDeviceConfig(sContext, 2 /* extraKeys */,
-                TIME_TO_REFRESH_HOURS /* expiringBy */, url);
-        mServerInterface.fetchGeekAndUpdate(
-                ProvisionerMetrics.createScheduledAttemptMetrics(sContext));
+    public void testFetchGeekRkpEnabled() throws Exception {
+        try (FakeRkpServer server = new FakeRkpServer(
+                FakeRkpServer.Response.FETCH_EEK_OK,
+                FakeRkpServer.Response.SIGN_CERTS_OK_VALID_CBOR)) {
+            Settings.setDeviceConfig(sContext, 1 /* extraKeys */,
+                    TIME_TO_REFRESH_HOURS /* expiringBy */, server.getUrl());
+            GeekResponse response = mServerInterface.fetchGeek(
+                    ProvisioningAttempt.createScheduledAttemptMetrics(sContext));
 
-        assertThat(Settings.getExtraSignedKeysAvailable(sContext)).isEqualTo(20);
-        assertThat(Settings.getExpiringBy(sContext)).isEqualTo(Duration.ofHours(72));
+            assertThat(response.numExtraAttestationKeys).isEqualTo(20);
+            assertThat(response.getChallenge()).isNotNull();
+            byte[] challenge = Base64.decode("AAABgEg1zGsBILStY/1VNI7st0AG9x2S/tba+H4=",
+                    Base64.DEFAULT);
+            assertThat(response.getChallenge()).isEqualTo(challenge);
+            byte[] ed25519GeekChain = Base64.decode(
+                    "g4RDoQEnoFgqpAEBAycgBiFYIJm57t1e5FL2hcZMYtw+YatXS"
+                            + "H11NymtdoAy0rPLY1jZWEAeIghLpLekyNdOAw7+uK8UTKc7b6XN3Np5xitk"
+                            + "/pk5r3bngPpmAIUNB5gqrJFcpyUUSQY0dcqKJ3rZ41pJ6wIDhEOhASegWCqk"
+                            + "AQEDJyAGIVgg6i+FDp5qDFz3vdn6KDK/2lXpIKJRA8kDkxjOoBUp7NFYQIJr"
+                            + "x12mNle3x3ESrRzCarMsIyrdFDDLghS2icXTHjG7uFAhSklNupEMbzNNg7xY"
+                            + "Ky6E28VZD5hh4sHqifLQrgSEQ6EBJ6BYTqUBAQJYIG+S0QRtcdinjojY0VaB"
+                            + "X5bReIPmMBuH7b8g0Uo7/mouAzgYIAQhWCC2XRxLmoM6nbUVWTehJvsP3+ec"
+                            + "rAHVpOzIOikAiFglOVhAgLKf0DKenUr+sCXywtIiaEbGILCq6BasZKFFg5vM"
+                            + "SVQlf6sWBVPwvTWT88a7WU5e+d4hBxSjtqSji4+Clpa6Aw==",
+                    Base64.DEFAULT);
+            byte[] p256GeekChain = Base64.decode(
+                    "g4RDoQEmoFhNpQECAyYgASFYIPcUituX9MxT79JkEcTjdR9mH6Rx"
+                            + "DGzP+glGgHSHVPKtIlggXn9b9uzk9hnM/xM3/Q+hyJPbGAZ2xF3m12p3hsMtr49YQC"
+                            + "+XjkL7vgctlUeFR5NAsB/Um0ekxESp8qEHhxDHn8sR9L+f6Dvg5zRMFfx7w34zBfTR"
+                            + "NDztAgRgehXgedOK/ySEQ6EBJqBYTaUBAgMmIAEhWCBRgKzPj5aM7A9Q4akbt5CGNI"
+                            + "vjw6xlAk209jEOCEYyOSJYIFTrlJ3+trTkczolTi8fnZ29+mbBEYvploxD5DD22nar"
+                            + "WECYOPs0OmXbc5ixJ6IVdPK+BueNIk7d8L/CAXTEtylrJBy12NJm+kTv9TAsBHTt6M"
+                            + "Zg2s6fVlcndCHT3pOP47jNhEOhASagWHGmAQICWCCDn/j9EBwSn5JBx1uN5E70GROa"
+                            + "xxttpw6V8mRTXacdwQM4GCABIVggFqRSEmOzhlZQ2N/yoKh9vNlup2hg6oxc8ZPllx"
+                            + "kNrN4iWCCJvsxsP16wOTSvl7o40RYdocwdZNOMSE74coEbOz4x7lhA+trPLaulMAxz"
+                            + "xeWrSZJZYET6xPIz5QSybBlk6RzjZDs0hgBlLfXdr6oBya+DyU74WpToZZNR4xgeOY"
+                            + "CnaUszzQ==",
+                    Base64.DEFAULT);
+            assertThat(response.getGeekChain(CborUtils.EC_CURVE_25519)).isEqualTo(ed25519GeekChain);
+            assertThat(response.getGeekChain(CborUtils.EC_CURVE_P256)).isEqualTo(p256GeekChain);
+        }
     }
 
     @Test
-    public void testRequestSignedCertUnregistered() throws IOException {
-        final String url = setupServerAndGetUrl(GEEK_RESPONSE,
-                HttpResponse.HTTP_DEVICE_UNREGISTERED);
-        Settings.setDeviceConfig(sContext, 2 /* extraKeys */,
-                TIME_TO_REFRESH_HOURS /* expiringBy */, url);
-        ProvisionerMetrics metrics = ProvisionerMetrics.createScheduledAttemptMetrics(sContext);
-        try {
+    public void testFetchKeyAndUpdate() throws Exception {
+        try (FakeRkpServer server = new FakeRkpServer(
+                FakeRkpServer.Response.FETCH_EEK_OK,
+                FakeRkpServer.Response.SIGN_CERTS_OK_VALID_CBOR)) {
+            Settings.setDeviceConfig(sContext, 2 /* extraKeys */,
+                    TIME_TO_REFRESH_HOURS /* expiringBy */, server.getUrl());
+            mServerInterface.fetchGeekAndUpdate(
+                    ProvisioningAttempt.createScheduledAttemptMetrics(sContext));
+
+            assertThat(Settings.getExtraSignedKeysAvailable(sContext)).isEqualTo(20);
+            assertThat(Settings.getExpiringBy(sContext)).isEqualTo(Duration.ofHours(72));
+        }
+    }
+
+    @Test
+    public void testRequestSignedCertUnregistered() throws Exception {
+        try (FakeRkpServer server = new FakeRkpServer(
+                FakeRkpServer.Response.FETCH_EEK_OK,
+                FakeRkpServer.Response.SIGN_CERTS_DEVICE_UNREGISTERED)) {
+            Settings.setDeviceConfig(sContext, 2 /* extraKeys */,
+                    TIME_TO_REFRESH_HOURS /* expiringBy */, server.getUrl());
+            ProvisioningAttempt metrics = ProvisioningAttempt.createScheduledAttemptMetrics(
+                    sContext);
             mServerInterface.requestSignedCertificates(new byte[0], new byte[0], metrics);
-            fail("Should fail due to unregistered device.");
+            assertWithMessage("Should fail due to unregistered device.").fail();
         } catch (RkpdException e) {
             assertThat(e.getErrorCode()).isEqualTo(RkpdException.ErrorCode.DEVICE_NOT_REGISTERED);
         }
     }
 
     @Test
-    public void testRequestSignedCertClientError() throws IOException {
-        final String url = setupServerAndGetUrl(GEEK_RESPONSE,
-                HttpResponse.HTTP_USER_UNAUTHORIZED);
-        Settings.setDeviceConfig(sContext, 2 /* extraKeys */,
-                TIME_TO_REFRESH_HOURS /* expiringBy */, url);
-        ProvisionerMetrics metrics = ProvisionerMetrics.createScheduledAttemptMetrics(sContext);
-        try {
+    public void testRequestSignedCertClientError() throws Exception {
+        try (FakeRkpServer server = new FakeRkpServer(
+                FakeRkpServer.Response.FETCH_EEK_OK,
+                FakeRkpServer.Response.SIGN_CERTS_USER_UNAUTHORIZED)) {
+            Settings.setDeviceConfig(sContext, 2 /* extraKeys */,
+                    TIME_TO_REFRESH_HOURS /* expiringBy */, server.getUrl());
+            ProvisioningAttempt metrics = ProvisioningAttempt.createScheduledAttemptMetrics(
+                    sContext);
             mServerInterface.requestSignedCertificates(new byte[0], new byte[0], metrics);
-            fail("Should fail due to client error.");
+            assertWithMessage("Should fail due to client error.").fail();
         } catch (RkpdException e) {
             assertThat(e.getErrorCode()).isEqualTo(RkpdException.ErrorCode.HTTP_CLIENT_ERROR);
         }
     }
 
     @Test
-    public void testRequestSignedCertCborError() throws IOException {
-        final String url = setupServerAndGetUrl(GEEK_RESPONSE,
-                HttpResponse.HTTP_OK_INVALID_CBOR);
-        Settings.setDeviceConfig(sContext, 2 /* extraKeys */,
-                TIME_TO_REFRESH_HOURS /* expiringBy */, url);
-        ProvisionerMetrics metrics = ProvisionerMetrics.createScheduledAttemptMetrics(sContext);
-        try {
+    public void testRequestSignedCertCborError() throws Exception {
+        try (FakeRkpServer server = new FakeRkpServer(
+                FakeRkpServer.Response.FETCH_EEK_OK,
+                FakeRkpServer.Response.SIGN_CERTS_OK_INVALID_CBOR)) {
+            Settings.setDeviceConfig(sContext, 2 /* extraKeys */,
+                    TIME_TO_REFRESH_HOURS /* expiringBy */, server.getUrl());
+            ProvisioningAttempt metrics = ProvisioningAttempt.createScheduledAttemptMetrics(
+                    sContext);
             mServerInterface.requestSignedCertificates(new byte[0], new byte[0], metrics);
-            fail("Should fail due to invalid cbor.");
+            assertWithMessage("Should fail due to invalid cbor.").fail();
         } catch (RkpdException e) {
             assertThat(e.getErrorCode()).isEqualTo(RkpdException.ErrorCode.INTERNAL_ERROR);
             assertThat(e).hasMessageThat().isEqualTo("Response failed to parse.");
@@ -237,27 +210,33 @@ public class ServerInterfaceTest {
     }
 
     @Test
-    public void testRequestSignedCertValid() throws IOException, RkpdException {
-        final String url = setupServerAndGetUrl(GEEK_RESPONSE,
-                HttpResponse.HTTP_OK_VALID_CBOR);
-        Settings.setDeviceConfig(sContext, 2 /* extraKeys */,
-                TIME_TO_REFRESH_HOURS /* expiringBy */, url);
-        ProvisionerMetrics metrics = ProvisionerMetrics.createScheduledAttemptMetrics(sContext);
-        List<byte[]> certChains = mServerInterface.requestSignedCertificates(new byte[0],
-                new byte[0], metrics);
-        assertThat(certChains).isEmpty();
-        assertThat(certChains).isNotNull();
+    public void testRequestSignedCertValid() throws Exception {
+        try (FakeRkpServer server = new FakeRkpServer(
+                FakeRkpServer.Response.FETCH_EEK_OK,
+                FakeRkpServer.Response.SIGN_CERTS_OK_VALID_CBOR)) {
+            Settings.setDeviceConfig(sContext, 2 /* extraKeys */,
+                    TIME_TO_REFRESH_HOURS /* expiringBy */, server.getUrl());
+            ProvisioningAttempt metrics = ProvisioningAttempt.createScheduledAttemptMetrics(
+                    sContext);
+            List<byte[]> certChains = mServerInterface.requestSignedCertificates(new byte[0],
+                    new byte[0], metrics);
+            assertThat(certChains).isEmpty();
+            assertThat(certChains).isNotNull();
+        }
     }
 
     @Test
-    public void testDataBudgetEmptyFetchGeekNetworkConnected() {
+    public void testDataBudgetEmptyFetchGeekNetworkConnected() throws Exception {
         // Check the data budget in order to initialize a rolling window.
         assertThat(Settings.hasErrDataBudget(sContext, null /* curTime */)).isTrue();
         Settings.consumeErrDataBudget(sContext, Settings.FAILURE_DATA_USAGE_MAX);
-        ProvisionerMetrics metrics = ProvisionerMetrics.createScheduledAttemptMetrics(sContext);
+        ProvisioningAttempt metrics = ProvisioningAttempt.createScheduledAttemptMetrics(sContext);
         try {
+            // We are okay in mocking connectivity failure since err data budget is the first thing
+            // to be checked.
+            mockConnectivityFailure(ConnectivityState.CONNECTED);
             mServerInterface.fetchGeek(metrics);
-            fail("Network transaction should not have proceeded.");
+            assertWithMessage("Network transaction should not have proceeded.").fail();
         } catch (RkpdException e) {
             assertThat(e).hasMessageThat().contains("Out of data budget due to repeated errors");
             assertThat(e.getErrorCode()).isEqualTo(
@@ -269,19 +248,18 @@ public class ServerInterfaceTest {
     public void testDataBudgetEmptyFetchGeekNetworkDisconnected() throws Exception {
         // Check the data budget in order to initialize a rolling window.
         try {
-            setEthernetEnabled(false);
-            setAirplaneMode(true);
+            // We are okay in mocking connectivity failure since err data budget is the first thing
+            // to be checked.
+            mockConnectivityFailure(ConnectivityState.DISCONNECTED);
             assertThat(Settings.hasErrDataBudget(sContext, null /* curTime */)).isTrue();
             Settings.consumeErrDataBudget(sContext, Settings.FAILURE_DATA_USAGE_MAX);
-            ProvisionerMetrics metrics = ProvisionerMetrics.createScheduledAttemptMetrics(sContext);
+            ProvisioningAttempt metrics = ProvisioningAttempt.createScheduledAttemptMetrics(
+                    sContext);
             mServerInterface.fetchGeek(metrics);
-            fail("Network transaction should not have proceeded.");
+            assertWithMessage("Network transaction should not have proceeded.").fail();
         } catch (RkpdException e) {
             assertThat(e).hasMessageThat().contains("Out of data budget due to repeated errors");
             assertThat(e.getErrorCode()).isEqualTo(RkpdException.ErrorCode.NO_NETWORK_CONNECTIVITY);
-        } finally {
-            setEthernetEnabled(true);
-            setAirplaneMode(false);
         }
     }
 
@@ -294,7 +272,7 @@ public class ServerInterfaceTest {
     }
 
     @Test
-    public void testReadTextErrorFromErrorStreamNoErrorData() throws IOException {
+    public void testReadTextErrorFromErrorStreamNoErrorData() throws Exception {
         final String expectedError = "No error data returned by server.";
 
         HttpURLConnection connection = Mockito.mock(HttpURLConnection.class);
@@ -306,7 +284,7 @@ public class ServerInterfaceTest {
     }
 
     @Test
-    public void testReadTextErrorFromErrorStream() throws IOException {
+    public void testReadTextErrorFromErrorStream() throws Exception {
         final String error = "Explanation for error goes here.";
 
         HttpURLConnection connection = Mockito.mock(HttpURLConnection.class);
@@ -321,7 +299,7 @@ public class ServerInterfaceTest {
     @Test
     public void testReadTextError() throws IOException {
         final String error = "This is an error.  Oh No.";
-        final String[] textContentTypes = new String[] {
+        final String[] textContentTypes = new String[]{
                 "text",
                 "text/ANYTHING",
                 "text/what-is-this; charset=unknown",
@@ -330,7 +308,7 @@ public class ServerInterfaceTest {
                 "text/yolo; charset=ASCII"
         };
 
-        for (String contentType: textContentTypes) {
+        for (String contentType : textContentTypes) {
             HttpURLConnection connection = Mockito.mock(HttpURLConnection.class);
             Mockito.when(connection.getContentType()).thenReturn(contentType);
             Mockito.when(connection.getInputStream())
@@ -396,127 +374,19 @@ public class ServerInterfaceTest {
         assertThat(ServerInterface.readErrorFromConnection(connection)).isEqualTo(sb.toString());
     }
 
-    private String setupServerAndGetUrl(byte[] geekResponse, HttpResponse signCertResponse)
-            throws IOException {
-        final NanoHTTPD server = new NanoHTTPD("localhost", 0) {
-            @Override
-            public Response serve(IHTTPSession session) {
-                consumeRequestBody((HTTPSession) session);
-                if (session.getUri().contains(":fetchEekChain")) {
-                    return newFixedLengthResponse(Response.Status.OK, "application/cbor",
-                            new ByteArrayInputStream(geekResponse), geekResponse.length);
-                } else if (session.getUri().contains(":signCertificates")) {
-                    Response.IStatus status = new Response.IStatus() {
-                        @Override
-                        public String getDescription() {
-                            return signCertResponse.getDescription();
-                        }
+    private void mockConnectivityFailure(ConnectivityState state) {
+        ConnectivityManager mockedConnectivityManager = Mockito.mock(ConnectivityManager.class);
+        NetworkInfo mockedNetwork = Mockito.mock(NetworkInfo.class);
 
-                        @Override
-                        public int getRequestStatus() {
-                            return signCertResponse.getCode();
-                        }
-                    };
-                    byte[] response = signCertResponse.getMessage();
-                    return newFixedLengthResponse(status, signCertResponse.getMime(),
-                            new ByteArrayInputStream(response), response.length);
-                }
-                fail("Unexpected HTTP request: " + session.getUri());
-                return null;
-            }
-
-            void consumeRequestBody(HTTPSession session) {
-                try {
-                    session.getInputStream().readNBytes((int) session.getBodySize());
-                } catch (IOException e) {
-                    fail("Error reading request bytes: " + e);
-                }
-            }
-        };
-        server.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false);
-        return "http://localhost:" + server.getListeningPort() + "/";
+        Mockito.when(sContext.getSystemService(ConnectivityManager.class))
+                .thenReturn(mockedConnectivityManager);
+        Mockito.when(mockedConnectivityManager.getActiveNetworkInfo()).thenReturn(mockedNetwork);
+        Mockito.when(mockedNetwork.isConnected()).thenReturn(state == ConnectivityState.CONNECTED);
     }
 
-    private void setEthernetEnabled(boolean enable) throws Exception {
-        // Whether the device running these tests supports ethernet.
-        EthernetManager ethernetManager = sContext.getSystemService(EthernetManager.class);
-        assertThat(ethernetManager).isNotNull();
-        boolean hasEthernet = sContext.getPackageManager()
-                .hasSystemFeature(PackageManager.FEATURE_ETHERNET);
-        if (hasEthernet) {
-            try (PermissionContext c = TestApis.permissions().withPermission(
-                    Manifest.permission.NETWORK_SETTINGS)) {
-                // Enable/Disable the ethernet as it can not be controlled by airplane mode.
-                ethernetManager.setEthernetEnabled(enable);
-            }
-        }
+    private enum ConnectivityState {
+        DISCONNECTED,
+        CONNECTED
     }
 
-    private void setAirplaneMode(boolean enable) throws Exception {
-        ConnectivityManager cm = sContext.getSystemService(ConnectivityManager.class);
-        assertThat(cm).isNotNull();
-        try (PermissionContext ignored = TestApis.permissions().withPermission(
-                Manifest.permission.NETWORK_SETTINGS)) {
-            cm.setAirplaneMode(enable);
-
-            // Now wait a "reasonable" time for the network to go down. This timeout matches
-            // the connectivity manager tests, which wait for 2 minutes.
-            for (int i = 0; i < 120; ++i) {
-                NetworkInfo networkInfo = cm.getActiveNetworkInfo();
-                Log.e(TAG, "Checking active network... " + networkInfo);
-                if (enable) {
-                    if (networkInfo == null || !networkInfo.isConnected()) {
-                        Log.e(TAG, "Successfully disconnected from to the network.");
-                        return;
-                    }
-                } else if (networkInfo != null && networkInfo.isConnected()) {
-                    Log.e(TAG, "Successfully reconnected to the network.");
-                    return;
-                }
-                Thread.sleep(1000);
-            }
-        }
-        fail("Failed to " + (enable ? "enable" : "disable") + " airplane mode");
-    }
-
-    enum HttpResponse {
-        HTTP_OK_VALID_CBOR(200, "OK", Base64.decode("gkCA", Base64.DEFAULT)),
-        HTTP_OK_INVALID_CBOR(200, "OK"),
-        HTTP_DEVICE_UNREGISTERED(444, "Device Not Registered"),
-        HTTP_USER_UNAUTHORIZED(403, "User not authorized");
-
-        private final int mResponseCode;
-        private final String mResponseDescription;
-        private final byte[] mResponseMessage;
-        private final String mResponseMime;
-        HttpResponse(int code, String description) {
-            mResponseCode = code;
-            mResponseDescription = code + " " + description;
-            mResponseMessage = description.getBytes(StandardCharsets.UTF_8);
-            mResponseMime = "text/plain";
-        }
-
-        HttpResponse(int code, String description, byte[] message) {
-            mResponseMessage = Arrays.copyOf(message, message.length);
-            mResponseCode = code;
-            mResponseDescription = code + " " + description;
-            mResponseMime = "application/cbor";
-        }
-
-        public int getCode() {
-            return mResponseCode;
-        }
-
-        public String getDescription() {
-            return mResponseDescription;
-        }
-
-        public byte[] getMessage() {
-            return mResponseMessage.clone();
-        }
-
-        public String getMime() {
-            return mResponseMime;
-        }
-    }
 }
