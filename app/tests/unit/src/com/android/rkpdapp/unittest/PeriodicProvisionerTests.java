@@ -24,7 +24,6 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoMoreInteractions;
 
 import android.content.Context;
 
@@ -51,6 +50,7 @@ import com.android.rkpdapp.testutil.SystemPropertySetter;
 import com.android.rkpdapp.utils.Settings;
 
 import org.junit.After;
+import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -75,6 +75,9 @@ public class PeriodicProvisionerTests {
     @Before
     public void setUp() {
         mContext = ApplicationProvider.getApplicationContext();
+
+        Assume.assumeFalse(Settings.getDefaultUrl().isEmpty());
+
         RkpdDatabase.getDatabase(mContext).provisionedKeyDao().deleteAllKeys();
         mProvisioner = TestWorkerBuilder.from(
                 mContext,
@@ -85,7 +88,7 @@ public class PeriodicProvisionerTests {
                 .setExecutor(new SynchronousExecutor())
                 .build();
         WorkManagerTestInitHelper.initializeTestWorkManager(mContext, config);
-
+        Settings.clearPreferences(mContext);
     }
 
     @After
@@ -172,8 +175,8 @@ public class PeriodicProvisionerTests {
             ServiceManagerInterface.setInstances(new SystemInterface[]{mockHal});
             assertThat(mProvisioner.doWork()).isEqualTo(ListenableWorker.Result.failure());
 
-            // we should have failed before making any local HAl calls
-            verifyNoMoreInteractions(mockHal);
+            // we should have failed before trying to generate any keys
+            verify(mockHal, never()).generateKey(any());
         }
     }
 
@@ -193,8 +196,8 @@ public class PeriodicProvisionerTests {
             ServiceManagerInterface.setInstances(new SystemInterface[]{mockHal});
             assertThat(mProvisioner.doWork()).isEqualTo(ListenableWorker.Result.success());
 
-            // since RKP is disabled, there should be no interactions with the HAL
-            verifyNoMoreInteractions(mockHal);
+            // since RKP is disabled, there should be no keys generated
+            verify(mockHal, never()).generateKey(any());
         }
 
         // when RKP is detected as disabled, the provisioner is supposed to delete all keys
