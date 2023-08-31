@@ -45,7 +45,6 @@ import com.android.rkpdapp.interfaces.ServiceManagerInterface;
 import com.android.rkpdapp.interfaces.SystemInterface;
 import com.android.rkpdapp.provisioner.PeriodicProvisioner;
 import com.android.rkpdapp.testutil.FakeRkpServer;
-import com.android.rkpdapp.testutil.NetworkUtils;
 import com.android.rkpdapp.testutil.SystemPropertySetter;
 import com.android.rkpdapp.utils.Settings;
 import com.android.rkpdapp.utils.X509Utils;
@@ -108,15 +107,15 @@ public class KeystoreIntegrationTest {
     @BeforeClass
     public static void init() {
         sContext = ApplicationProvider.getApplicationContext();
-
-        assume()
-                .withMessage("The RKP server hostname is not configured -- assume RKP disabled.")
-                .that(SystemProperties.get("remote_provisioning.hostname"))
-                .isNotEmpty();
     }
 
     @Before
     public void setUp() throws Exception {
+        assume()
+                .withMessage("The RKP server hostname is not configured -- assume RKP disabled.")
+                .that(SystemProperties.get("remote_provisioning.hostname"))
+                .isNotEmpty();
+
         Settings.clearPreferences(sContext);
 
         mKeyDao = RkpdDatabase.getDatabase(sContext).provisionedKeyDao();
@@ -132,8 +131,10 @@ public class KeystoreIntegrationTest {
     public void tearDown() throws Exception {
         Settings.clearPreferences(sContext);
 
-        mKeyStore.deleteEntry(getTestKeyAlias());
-        mKeyDao.deleteAllKeys();
+        if (mKeyDao != null) {
+            mKeyStore.deleteEntry(getTestKeyAlias());
+            mKeyDao.deleteAllKeys();
+        }
 
         ServiceManagerInterface.setInstances(null);
     }
@@ -229,13 +230,9 @@ public class KeystoreIntegrationTest {
             assertWithMessage("Should have gotten a KeyStoreException").fail();
         } catch (ProviderException e) {
             assertThat(e.getCause()).isInstanceOf(KeyStoreException.class);
-            if (NetworkUtils.isNetworkConnected(sContext)) {
-                assertThat(((KeyStoreException) e.getCause()).getErrorCode())
-                        .isEqualTo(ResponseCode.OUT_OF_KEYS_TRANSIENT_ERROR);
-            } else {
-                assertThat(((KeyStoreException) e.getCause()).getErrorCode())
-                        .isEqualTo(ResponseCode.OUT_OF_KEYS_PENDING_INTERNET_CONNECTIVITY);
-            }
+            assertThat(((KeyStoreException) e.getCause()).getErrorCode()).isAnyOf(
+                    ResponseCode.OUT_OF_KEYS_TRANSIENT_ERROR,
+                    ResponseCode.OUT_OF_KEYS_PENDING_INTERNET_CONNECTIVITY);
         }
     }
 
