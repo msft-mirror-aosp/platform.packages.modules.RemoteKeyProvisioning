@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Copyright (C) 2023 The Android Open Source Project
+<!-- Copyright (C) 2022 The Android Open Source Project
 
      Licensed under the Apache License, Version 2.0 (the "License");
      you may not use this file except in compliance with the License.
@@ -13,18 +13,18 @@
      See the License for the specific language governing permissions and
      limitations under the License.
 -->
-<configuration Description="Config for Rkpd application host test cases">
-    <option name="config-descriptor:metadata" key="component" value="RkpdApp" />
-    <option name="config-descriptor:metadata" key="parameter" value="not_instant_app" />
-    <option name="config-descriptor:metadata" key="parameter" value="not_multi_abi" />
-    <option name="config-descriptor:metadata" key="parameter" value="secondary_user" />
+<configuration description="Unit tests for the rkpd system server.">
+    <option name="test-suite-tag" value="apct" />
+    <option name="test-suite-tag" value="apct-instrumentation" />
+
     <target_preparer class="com.android.tradefed.targetprep.suite.SuiteApkInstaller">
         <option name="cleanup-apks" value="true" />
-        <option name="test-file-name" value="RkpdAppIntegrationTests.apk" />
-        <option name="test-file-name" value="RkpdAppUnitTests.apk" />
+        <option name="test-file-name" value="service-rkp-unittest.apk" />
     </target_preparer>
-    <test class="com.android.compatibility.common.tradefed.testtype.JarHostTest" >
-        <option name="jar" value="RkpdAppHostTests.jar" />
+
+    <test class="com.android.tradefed.testtype.AndroidJUnitTest" >
+        <option name="package" value="android.security.rkp.service.test" />
+        <option name="runner" value="androidx.test.runner.AndroidJUnitRunner" />
     </test>
 
     <!-- Only run if RKPD mainline module is installed -->
