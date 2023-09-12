@@ -54,7 +54,7 @@ import java.util.UUID;
 public class ServerInterface {
 
     private static final int ASYNC_TIMEOUT_MS = 20000;
-    private static final int SYNC_TIMEOUT_MS = 2000;
+    private static final int SYNC_TIMEOUT_MS = 500;
     private static final int BACKOFF_TIME_MS = 100;
     private static final int SHORT_RETRY_COUNT = 2;
 
