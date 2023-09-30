@@ -39,6 +39,7 @@ import com.android.rkpdapp.utils.Settings;
 /** Provides the implementation for IRemoteProvisioning.aidl */
 public class RemoteProvisioningService extends Service {
     public static final String TAG = "com.android.rkpdapp";
+    private static final boolean IS_ASYNC = false;
     private final IRemoteProvisioning.Stub mBinder = new RemoteProvisioningBinder();
 
     @Override
@@ -58,7 +59,7 @@ public class RemoteProvisioningService extends Service {
             final Context context = getApplicationContext();
             RkpdClientOperation metric = RkpdClientOperation.getRegistration(callerUid, irpcName);
             try (metric) {
-                if (Settings.getDefaultUrl().isEmpty()) {
+                if (Settings.getUrl(context).isEmpty()) {
                     callback.onError("RKP is disabled. System configured with no default URL.");
                     metric.setResult(RkpdClientOperation.Result.RKP_UNSUPPORTED);
                     return;
@@ -75,9 +76,9 @@ public class RemoteProvisioningService extends Service {
                 }
 
                 ProvisionedKeyDao dao = RkpdDatabase.getDatabase(context).provisionedKeyDao();
-                Provisioner provisioner = new Provisioner(context, dao);
+                Provisioner provisioner = new Provisioner(context, dao, IS_ASYNC);
                 IRegistration.Stub registration = new RegistrationBinder(context, callerUid,
-                        systemInterface, dao, new ServerInterface(context), provisioner,
+                        systemInterface, dao, new ServerInterface(context, IS_ASYNC), provisioner,
                         ThreadPool.EXECUTOR);
                 metric.setResult(RkpdClientOperation.Result.SUCCESS);
                 callback.onSuccess(registration);
