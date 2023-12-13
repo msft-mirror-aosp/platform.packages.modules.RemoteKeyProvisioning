@@ -41,10 +41,12 @@ import androidx.work.testing.TestWorkerBuilder;
 import com.android.rkpdapp.database.ProvisionedKey;
 import com.android.rkpdapp.database.ProvisionedKeyDao;
 import com.android.rkpdapp.database.RkpdDatabase;
+import com.android.rkpdapp.interfaces.ServerInterface;
 import com.android.rkpdapp.interfaces.ServiceManagerInterface;
 import com.android.rkpdapp.interfaces.SystemInterface;
 import com.android.rkpdapp.provisioner.PeriodicProvisioner;
 import com.android.rkpdapp.testutil.FakeRkpServer;
+import com.android.rkpdapp.testutil.SystemInterfaceSelector;
 import com.android.rkpdapp.testutil.SystemPropertySetter;
 import com.android.rkpdapp.utils.Settings;
 import com.android.rkpdapp.utils.X509Utils;
@@ -116,6 +118,11 @@ public class KeystoreIntegrationTest {
                 .that(SystemProperties.get("remote_provisioning.hostname"))
                 .isNotEmpty();
 
+        assume()
+                .withMessage("RKP Integration tests rely on network availability.")
+                .that(ServerInterface.isNetworkConnected(sContext))
+                .isTrue();
+
         Settings.clearPreferences(sContext);
 
         mKeyDao = RkpdDatabase.getDatabase(sContext).provisionedKeyDao();
@@ -123,7 +130,8 @@ public class KeystoreIntegrationTest {
         mKeyStore.load(null);
         mKeyDao.deleteAllKeys();
 
-        SystemInterface systemInterface = ServiceManagerInterface.getInstance(mServiceName);
+        SystemInterface systemInterface =
+                SystemInterfaceSelector.getSystemInterfaceForServiceName(mServiceName);
         ServiceManagerInterface.setInstances(new SystemInterface[] {systemInterface});
     }
 
@@ -222,17 +230,17 @@ public class KeystoreIntegrationTest {
         // Verify that if the system is set to rkp only, key creation fails when RKP is unable
         // to get keys.
 
-        try {
+        try (FakeRkpServer server = new FakeRkpServer(FakeRkpServer.Response.INTERNAL_ERROR,
+                FakeRkpServer.Response.INTERNAL_ERROR)) {
             Settings.setDeviceConfig(sContext, Settings.EXTRA_SIGNED_KEYS_AVAILABLE_DEFAULT,
-                    Duration.ofDays(1), "bad url");
+                    Duration.ofDays(1), server.getUrl());
             Settings.setMaxRequestTime(sContext, 100);
             createKeystoreKeyBackedByRkp();
             assertWithMessage("Should have gotten a KeyStoreException").fail();
         } catch (ProviderException e) {
             assertThat(e.getCause()).isInstanceOf(KeyStoreException.class);
-            assertThat(((KeyStoreException) e.getCause()).getErrorCode()).isAnyOf(
-                    ResponseCode.OUT_OF_KEYS_TRANSIENT_ERROR,
-                    ResponseCode.OUT_OF_KEYS_PENDING_INTERNET_CONNECTIVITY);
+            assertThat(((KeyStoreException) e.getCause()).getErrorCode())
+                    .isEqualTo(ResponseCode.OUT_OF_KEYS_TRANSIENT_ERROR);
         }
     }
 
@@ -244,14 +252,17 @@ public class KeystoreIntegrationTest {
                 .that(SystemProperties.getBoolean(getRkpOnlyProp(), false))
                 .isFalse();
 
-        Settings.setDeviceConfig(sContext, Settings.EXTRA_SIGNED_KEYS_AVAILABLE_DEFAULT,
-                Duration.ofDays(1), "bad url");
+        try (FakeRkpServer server = new FakeRkpServer(FakeRkpServer.Response.INTERNAL_ERROR,
+                FakeRkpServer.Response.INTERNAL_ERROR)) {
+            Settings.setDeviceConfig(sContext, Settings.EXTRA_SIGNED_KEYS_AVAILABLE_DEFAULT,
+                    Duration.ofDays(1), server.getUrl());
 
-        createKeystoreKey();
+            createKeystoreKey();
 
-        // Ensure the key has a cert, but it didn't come from rkpd.
-        assertThat(mKeyStore.getCertificateChain(getTestKeyAlias())).isNotEmpty();
-        assertThat(mKeyDao.getTotalKeysForIrpc(mServiceName)).isEqualTo(0);
+            // Ensure the key has a cert, but it didn't come from rkpd.
+            assertThat(mKeyStore.getCertificateChain(getTestKeyAlias())).isNotEmpty();
+            assertThat(mKeyDao.getTotalKeysForIrpc(mServiceName)).isEqualTo(0);
+        }
     }
 
     @Test
@@ -272,8 +283,9 @@ public class KeystoreIntegrationTest {
 
     @Test
     public void testRetryableRkpError() throws Exception {
-        try {
-            Settings.setDeviceConfig(sContext, 1, Duration.ofDays(1), "bad url");
+        try (FakeRkpServer server = new FakeRkpServer(FakeRkpServer.Response.INTERNAL_ERROR,
+                FakeRkpServer.Response.INTERNAL_ERROR)) {
+            Settings.setDeviceConfig(sContext, 1, Duration.ofDays(1), server.getUrl());
             Settings.setMaxRequestTime(sContext, 100);
             createKeystoreKeyBackedByRkp();
             Assert.fail("Expected a keystore exception");
