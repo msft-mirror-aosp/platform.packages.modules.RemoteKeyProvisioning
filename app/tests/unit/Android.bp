@@ -30,7 +30,7 @@ android_test {
         "libnanohttpd",
         "mockito-target-extended-minus-junit4",
         "platform-test-annotations",
-        "truth-prebuilt",
+        "truth",
         "rkpdapp-tink-prebuilt-test-only",
         "bouncycastle-unbundled",
     ],
@@ -40,7 +40,7 @@ android_test {
         "device-tests",
         "mts-rkpd",
     ],
-    min_sdk_version: "UpsideDownCake",
+    min_sdk_version: "33",
     instrumentation_for: "rkpdapp",
 }
 
