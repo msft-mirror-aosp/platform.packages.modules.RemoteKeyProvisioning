@@ -26,7 +26,7 @@ android_test {
         "androidx.test.rules",
         "androidx.work_work-testing",
         "platform-test-annotations",
-        "truth-prebuilt",
+        "truth",
     ],
     platform_apis: true,
     test_suites: [
@@ -34,6 +34,6 @@ android_test {
         "device-tests",
         "mts-rkpd",
     ],
-    min_sdk_version: "UpsideDownCake",
+    min_sdk_version: "33",
     instrumentation_for: "rkpdapp",
 }
