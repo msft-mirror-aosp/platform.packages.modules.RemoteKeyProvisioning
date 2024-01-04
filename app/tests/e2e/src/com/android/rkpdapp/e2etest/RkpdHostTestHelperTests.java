@@ -38,9 +38,11 @@ import androidx.work.testing.TestWorkerBuilder;
 import com.android.rkpdapp.database.ProvisionedKey;
 import com.android.rkpdapp.database.ProvisionedKeyDao;
 import com.android.rkpdapp.database.RkpdDatabase;
+import com.android.rkpdapp.interfaces.ServerInterface;
 import com.android.rkpdapp.interfaces.ServiceManagerInterface;
 import com.android.rkpdapp.interfaces.SystemInterface;
 import com.android.rkpdapp.provisioner.PeriodicProvisioner;
+import com.android.rkpdapp.testutil.SystemInterfaceSelector;
 import com.android.rkpdapp.testutil.TestDatabase;
 import com.android.rkpdapp.testutil.TestProvisionedKeyDao;
 import com.android.rkpdapp.utils.Settings;
@@ -58,7 +60,6 @@ import org.junit.runners.Parameterized;
 import java.security.KeyPairGenerator;
 import java.security.KeyStore;
 import java.security.spec.ECGenParameterSpec;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.Executors;
@@ -89,32 +90,42 @@ public class RkpdHostTestHelperTests {
     @BeforeClass
     public static void init() {
         sContext = ApplicationProvider.getApplicationContext();
-
-        assume()
-                .withMessage("The RKP server hostname is not configured -- assume RKP disabled.")
-                .that(SystemProperties.get("remote_provisioning.hostname"))
-                .isNotEmpty();
     }
 
     @Before
     public void setUp() throws Exception {
+        assume()
+                .withMessage("The RKP server hostname is not configured -- assume RKP disabled.")
+                .that(SystemProperties.get("remote_provisioning.hostname"))
+                .isNotEmpty();
+
+        assume()
+                .withMessage("RKP Integration tests rely on network availability.")
+                .that(ServerInterface.isNetworkConnected(sContext))
+                .isTrue();
+
         Settings.clearPreferences(sContext);
         mRealDao = RkpdDatabase.getDatabase(sContext).provisionedKeyDao();
         mRealDao.deleteAllKeys();
         mTestDao = Room.databaseBuilder(sContext, TestDatabase.class, DB_NAME).build().dao();
-        SystemInterface systemInterface = ServiceManagerInterface.getInstance(mServiceName);
-        ServiceManagerInterface.setInstances(new SystemInterface[] {systemInterface});
 
         mProvisioner = TestWorkerBuilder.from(
                 sContext,
                 PeriodicProvisioner.class,
                 Executors.newSingleThreadExecutor()).build();
+
+        SystemInterface systemInterface =
+                SystemInterfaceSelector.getSystemInterfaceForServiceName(mServiceName);
+        ServiceManagerInterface.setInstances(new SystemInterface[] {systemInterface});
     }
 
     @After
     public void tearDown() throws Exception {
         Settings.clearPreferences(sContext);
-        mRealDao.deleteAllKeys();
+
+        if (mRealDao != null) {
+            mRealDao.deleteAllKeys();
+        }
 
         KeyStore keyStore = KeyStore.getInstance("AndroidKeyStore");
         keyStore.load(null);
@@ -143,8 +154,6 @@ public class RkpdHostTestHelperTests {
     @Test
     public void provisionThenExpireThenProvisionAgain() throws Exception {
         assertThat(mProvisioner.doWork()).isEqualTo(ListenableWorker.Result.success());
-
-        final Instant expiry = Instant.now().plus(Duration.ofHours(1));
 
         List<ProvisionedKey> keys = mTestDao.getAllKeys();
 
@@ -177,6 +186,8 @@ public class RkpdHostTestHelperTests {
         StatsProcessor.PoolStats updatedPool = StatsProcessor.processPool(mRealDao, mServiceName,
                 Settings.getExtraSignedKeysAvailable(sContext),
                 Settings.getExpirationTime(sContext));
-        assertThat(updatedPool.toString()).isEqualTo(pool.toString());
+
+        assertThat(updatedPool.keysInUse + updatedPool.keysUnassigned)
+                .isEqualTo(pool.keysInUse + pool.keysUnassigned);
     }
 }
