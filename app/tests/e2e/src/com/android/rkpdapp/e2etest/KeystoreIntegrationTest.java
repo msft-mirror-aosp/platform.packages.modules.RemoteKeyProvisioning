@@ -72,6 +72,7 @@ import java.security.spec.ECGenParameterSpec;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.Executors;
 
 @RunWith(Parameterized.class)
@@ -91,6 +92,7 @@ public class KeystoreIntegrationTest {
     private final String mInstanceName;
     private final String mServiceName;
     private ProvisionedKeyDao mKeyDao;
+    private AutoCloseable mPeriodicProvisionerLock;
 
     @Rule
     public final TestName mName = new TestName();
@@ -123,8 +125,14 @@ public class KeystoreIntegrationTest {
                 .that(ServerInterface.isNetworkConnected(sContext))
                 .isTrue();
 
+        assume()
+                .withMessage(mInstanceName + " is not supported by this system")
+                .that(mInstanceName)
+                .isIn(List.of("default", "strongbox"));
+
         Settings.clearPreferences(sContext);
 
+        mPeriodicProvisionerLock = PeriodicProvisioner.lock();
         mKeyDao = RkpdDatabase.getDatabase(sContext).provisionedKeyDao();
         mKeyStore = KeyStore.getInstance("AndroidKeyStore");
         mKeyStore.load(null);
@@ -145,6 +153,10 @@ public class KeystoreIntegrationTest {
         }
 
         ServiceManagerInterface.setInstances(null);
+
+        if (mPeriodicProvisionerLock != null) {
+            mPeriodicProvisionerLock.close();
+        }
     }
 
     @Test
