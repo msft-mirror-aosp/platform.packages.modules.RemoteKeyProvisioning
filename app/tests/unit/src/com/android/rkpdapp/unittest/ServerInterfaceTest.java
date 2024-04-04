@@ -20,8 +20,8 @@ import static com.google.common.truth.Truth.assertThat;
 import static com.google.common.truth.Truth.assertWithMessage;
 
 import android.content.Context;
-import android.net.ConnectivityManager;
-import android.net.NetworkCapabilities;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
 import android.util.Base64;
 
 import androidx.test.core.app.ApplicationProvider;
@@ -62,6 +62,7 @@ public class ServerInterfaceTest {
     public void setUp() {
         Settings.clearPreferences(sContext);
         mServerInterface = new ServerInterface(sContext, false);
+        Utils.mockConnectivityState(sContext, Utils.ConnectivityState.CONNECTED);
     }
 
     @After
@@ -241,9 +242,6 @@ public class ServerInterfaceTest {
             ProvisioningAttempt metrics = ProvisioningAttempt.createScheduledAttemptMetrics(
                     sContext);
 
-            // We are okay in mocking connectivity failure since err data budget is the first thing
-            // to be checked.
-            mockConnectivityFailure(ConnectivityState.CONNECTED);
             mServerInterface.fetchGeek(metrics);
             assertWithMessage("Network transaction should not have proceeded.").fail();
         } catch (RkpdException e) {
@@ -266,7 +264,7 @@ public class ServerInterfaceTest {
 
             // We are okay in mocking connectivity failure since network check is the first thing
             // to happen.
-            mockConnectivityFailure(ConnectivityState.DISCONNECTED);
+            Utils.mockConnectivityState(sContext, Utils.ConnectivityState.DISCONNECTED);
             mServerInterface.fetchGeek(metrics);
             assertWithMessage("Network transaction should not have proceeded.").fail();
         } catch (RkpdException e) {
@@ -410,23 +408,32 @@ public class ServerInterfaceTest {
                 ServerInterface.SYNC_CONNECT_TIMEOUT_OPEN_MS);
     }
 
-    private void mockConnectivityFailure(ConnectivityState state) {
-        ConnectivityManager mockedConnectivityManager = Mockito.mock(ConnectivityManager.class);
+    @Test
+    public void testConnectionConsent() throws Exception {
+        String cnGmsFeature = "cn.google.services";
+        PackageManager mockedPackageManager = Mockito.mock(PackageManager.class);
+        Context mockedContext = Mockito.mock(Context.class);
+        ApplicationInfo fakeApplicationInfo = new ApplicationInfo();
 
-        Mockito.when(sContext.getSystemService(ConnectivityManager.class))
-                .thenReturn(mockedConnectivityManager);
-        NetworkCapabilities.Builder builder = new NetworkCapabilities.Builder();
-        builder.addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
-        if (state == ConnectivityState.CONNECTED) {
-            builder.addCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
-        }
-        Mockito.when(mockedConnectivityManager.getNetworkCapabilities(Mockito.any()))
-                .thenReturn(builder.build());
+        Mockito.when(mockedContext.getPackageManager()).thenReturn(mockedPackageManager);
+        Mockito.when(mockedPackageManager.hasSystemFeature(cnGmsFeature)).thenReturn(true);
+        Mockito.when(mockedPackageManager.getApplicationInfo(Mockito.any(), Mockito.eq(0)))
+                .thenReturn(fakeApplicationInfo);
+
+        fakeApplicationInfo.enabled = false;
+        assertThat(ServerInterface.assumeNetworkConsent(mockedContext)).isFalse();
+
+        fakeApplicationInfo.enabled = true;
+        assertThat(ServerInterface.assumeNetworkConsent(mockedContext)).isTrue();
+
+        Mockito.when(mockedPackageManager.getApplicationInfo(Mockito.any(), Mockito.eq(0)))
+                .thenThrow(new PackageManager.NameNotFoundException());
+        assertThat(ServerInterface.assumeNetworkConsent(mockedContext)).isFalse();
+
+        Mockito.when(mockedPackageManager.hasSystemFeature(cnGmsFeature)).thenReturn(false);
+        assertThat(ServerInterface.assumeNetworkConsent(mockedContext)).isTrue();
+
+        fakeApplicationInfo.enabled = false;
+        assertThat(ServerInterface.assumeNetworkConsent(mockedContext)).isTrue();
     }
-
-    private enum ConnectivityState {
-        DISCONNECTED,
-        CONNECTED
-    }
-
 }
