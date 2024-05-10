@@ -20,9 +20,9 @@ package {
 genrule {
     name: "statslog-rkpd-java-gen",
     tools: ["stats-log-api-gen"],
-    cmd: "$(location stats-log-api-gen) --java $(out) --module remoteprovisioner " +
-        "--javaPackage com.android.rkpdapp --javaClass RkpdStatsLog",
-    out: ["com/android/rkpdapp/RkpdStatsLog.java"],
+    cmd: "$(location stats-log-api-gen) --java $(out) --module rkpd " +
+        "--javaPackage com.android.rkpdapp.metrics --javaClass RkpdStatsLog",
+    out: ["com/android/rkpdapp/metrics/RkpdStatsLog.java"],
 }
 
 aidl_interface {
@@ -59,7 +59,8 @@ sdk {
 android_app {
     name: "rkpdapp",
     sdk_version: "module_current",
-    min_sdk_version: "UpsideDownCake",
+    target_sdk_version: "34",
+    min_sdk_version: "33",
     updatable: false,
     privileged: true,
     libs: [

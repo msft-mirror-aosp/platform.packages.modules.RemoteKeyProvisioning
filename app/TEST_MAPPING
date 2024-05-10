@@ -4,13 +4,28 @@
       "name": "RkpdAppUnitTests"
     },
     {
-      "name": "RkpdAppGoogleUnitTests"
+      "name": "RkpdAppGoogleUnitTests",
+      "keywords": ["internal"]
     },
     {
       "name": "RkpdAppIntegrationTests"
     },
     {
-      "name": "RkpdAppGoogleIntegrationTests"
+      "name": "RkpdAppGoogleIntegrationTests",
+      "keywords": ["internal"]
+    }
+  ],
+  "avf-postsubmit": [
+    {
+      "name": "AvfRkpdAppGoogleIntegrationTests",
+      "keywords": ["internal"]
+    }
+  ],
+  "avf-presubmit": [
+    {
+      // TODO(b/325610326): Add this target to presubmit once there is enough
+      // SLO data for it.
+      "name": "AvfRkpdAppIntegrationTests"
     }
   ],
   "mainline-presubmit": [

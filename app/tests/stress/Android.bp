@@ -23,9 +23,8 @@ android_test {
         "androidx.test.ext.junit",
         "androidx.test.core",
         "androidx.test.rules",
-        "android.security.remoteprovisioning-java",
         "platform-test-annotations",
-        "truth-prebuilt",
+        "truth",
     ],
     platform_apis: true,
     test_suites: [
@@ -33,6 +32,6 @@ android_test {
         "device-tests",
         "mts-rkpd",
     ],
-    min_sdk_version: "UpsideDownCake",
+    min_sdk_version: "33",
     instrumentation_for: "rkpdapp",
 }

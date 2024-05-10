@@ -45,10 +45,16 @@ public abstract class ProvisionedKeyDao {
     public abstract void updateKey(ProvisionedKey key);
 
     /**
-     * Delete all expiring keys provided by given Instant.
+     * Gets all the keys in the database.
      */
-    @Query("DELETE FROM provisioned_keys WHERE expiration_time < :expiryTime")
-    public abstract void deleteExpiringKeys(Instant expiryTime);
+    @Query("SELECT * FROM provisioned_keys")
+    public abstract List<ProvisionedKey> getAllKeys();
+
+    /**
+     * Deletes a specific key from the database.
+     */
+    @Query("DELETE from provisioned_keys WHERE key_blob = :keyBlob")
+    public abstract void deleteKey(byte[] keyBlob);
 
     /**
      * Delete all the provisioned keys.
@@ -57,11 +63,17 @@ public abstract class ProvisionedKeyDao {
     public abstract void deleteAllKeys();
 
     /**
-     * Get all provisioned keys for a specific IRPC that are expiring at a given Instant.
+     * Delete all expiring keys provided by given Instant.
      */
-    @Query("SELECT * FROM provisioned_keys"
+    @Query("DELETE FROM provisioned_keys WHERE expiration_time < :expiryTime")
+    public abstract void deleteExpiringKeys(Instant expiryTime);
+
+    /**
+     * Get a count of provisioned keys for a specific IRPC that are expiring at a given Instant.
+     */
+    @Query("SELECT COUNT(*) FROM provisioned_keys"
             + " WHERE expiration_time < :expiryTime AND irpc_hal = :irpcHal")
-    public abstract List<ProvisionedKey> getExpiringKeysForIrpc(String irpcHal, Instant expiryTime);
+    public abstract int getTotalExpiringKeysForIrpc(String irpcHal, Instant expiryTime);
 
     /**
      * Get provisioned keys that can be assigned to clients, factoring in an expiration time to
@@ -97,8 +109,9 @@ public abstract class ProvisionedKeyDao {
     /**
      * Stores the upgraded key blob.
      */
-    @Query("UPDATE provisioned_keys SET key_blob = :newKeyBlob WHERE key_blob = :oldKeyBlob")
-    public abstract int upgradeKeyBlob(byte[] oldKeyBlob, byte[] newKeyBlob);
+    @Query("UPDATE provisioned_keys SET key_blob = :newKeyBlob"
+            + " WHERE key_blob = :oldKeyBlob AND client_uid = :clientUid")
+    public abstract int upgradeKeyBlob(int clientUid, byte[] oldKeyBlob, byte[] newKeyBlob);
 
     /**
      * This transaction first looks to see if a caller already has a key assigned, and if so
