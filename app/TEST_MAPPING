@@ -17,9 +17,18 @@
   ],
   "avf-postsubmit": [
     {
+      "name": "AvfRkpdAppGoogleIntegrationTests",
+      "keywords": ["internal"]
+    }
+  ],
+  "avf-presubmit": [
+    {
       // TODO(b/325610326): Add this target to presubmit once there is enough
       // SLO data for it.
       "name": "AvfRkpdAppIntegrationTests"
+    },
+    {
+      "name": "AvfRkpdVmAttestationTestApp"
     }
   ],
   "mainline-presubmit": [
@@ -28,6 +37,14 @@
     },
     {
       "name": "RkpdAppGoogleIntegrationTests[com.google.android.rkpd.apex]"
+    }
+  ],
+  "rkpd-mainline-presubmit": [
+    {
+      "name": "RkpdAppGoogleUnitTests"
+    },
+    {
+      "name": "RkpdAppGoogleIntegrationTests"
     }
   ]
 }
