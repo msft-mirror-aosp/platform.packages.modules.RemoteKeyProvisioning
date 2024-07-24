@@ -20,6 +20,10 @@ package com.android.rkpdapp.unittest;
 import static com.google.crypto.tink.subtle.EllipticCurves.EcdsaEncoding.IEEE_P1363;
 import static com.google.crypto.tink.subtle.Enums.HashType.SHA256;
 
+import android.content.Context;
+import android.net.ConnectivityManager;
+import android.net.NetworkCapabilities;
+
 import com.google.crypto.tink.subtle.EcdsaSignJce;
 import com.google.crypto.tink.subtle.Ed25519Sign;
 import com.google.crypto.tink.subtle.EllipticCurves;
@@ -28,6 +32,7 @@ import org.bouncycastle.asn1.x509.BasicConstraints;
 import org.bouncycastle.asn1.x509.Extension;
 import org.bouncycastle.asn1.x509.KeyUsage;
 import org.bouncycastle.x509.X509V3CertificateGenerator;
+import org.mockito.Mockito;
 
 import java.io.ByteArrayOutputStream;
 import java.math.BigInteger;
@@ -150,15 +155,23 @@ public class Utils {
 
     public static X509Certificate signPublicKey(KeyPair issuerKeyPair, PublicKey publicKeyToSign,
             Instant expirationInstant) throws Exception {
+        Instant now = Instant.now();
+        return signPublicKey(issuerKeyPair, publicKeyToSign, now, expirationInstant);
+    }
+
+    /**
+     * Generates a certificate for given key and issuer.
+     */
+    public static X509Certificate signPublicKey(KeyPair issuerKeyPair, PublicKey publicKeyToSign,
+            Instant creationInstant, Instant expirationInstant) throws Exception {
         X500Principal issuer = new X500Principal("CN=TEE");
         BigInteger serial = BigInteger.ONE;
         X500Principal subject = new X500Principal("CN=TEE");
 
-        Instant now = Instant.now();
         X509V3CertificateGenerator certificateBuilder = new X509V3CertificateGenerator();
         certificateBuilder.setIssuerDN(issuer);
         certificateBuilder.setSerialNumber(serial);
-        certificateBuilder.setNotBefore(Date.from(now));
+        certificateBuilder.setNotBefore(Date.from(creationInstant));
         certificateBuilder.setNotAfter(Date.from(expirationInstant));
         certificateBuilder.setSignatureAlgorithm("SHA256WITHECDSA");
         certificateBuilder.setSubjectDN(subject);
@@ -291,5 +304,27 @@ public class Utils {
                     .end()
                 .build());
         return baos.toByteArray();
+    }
+
+    /**
+     * Mocks out the connectivity status for unit tests.
+     */
+    public static void mockConnectivityState(Context context, ConnectivityState state) {
+        ConnectivityManager mockedConnectivityManager = Mockito.mock(ConnectivityManager.class);
+
+        Mockito.when(context.getSystemService(ConnectivityManager.class))
+                .thenReturn(mockedConnectivityManager);
+        NetworkCapabilities.Builder builder = new NetworkCapabilities.Builder();
+        builder.addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
+        if (state == ConnectivityState.CONNECTED) {
+            builder.addCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
+        }
+        Mockito.when(mockedConnectivityManager.getNetworkCapabilities(Mockito.any()))
+                .thenReturn(builder.build());
+    }
+
+    public enum ConnectivityState {
+        DISCONNECTED,
+        CONNECTED
     }
 }
