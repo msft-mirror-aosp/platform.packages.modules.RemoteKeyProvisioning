@@ -28,6 +28,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.work.ListenableWorker;
 import androidx.work.testing.TestWorkerBuilder;
 
+import com.android.compatibility.common.util.PropertyUtil;
 import com.android.rkpdapp.provisioner.WidevineProvisioner;
 
 import org.junit.BeforeClass;
@@ -54,6 +55,15 @@ public class WidevineHostTestHelperTests {
     }
 
     private boolean isProvisioning4() {
+        if (PropertyUtil.getFirstApiLevel() < android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            Log.i(TAG, "First API level less than U: " + PropertyUtil.getFirstApiLevel());
+            return false;
+        }
+        // Check SoC API level
+        if (PropertyUtil.getVsrApiLevel() < android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            Log.i(TAG, "VSR API level less than U: " + PropertyUtil.getFirstApiLevel());
+            return false;
+        }
         return sDrm.getPropertyString("provisioningModel").equals("BootCertificateChain");
     }
 
