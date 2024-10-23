@@ -70,13 +70,12 @@ public class WidevineProvisioner extends Worker {
 
     private static String buildUserAgentString() {
         ArrayList<String> parts = new ArrayList<>();
-        parts.add("AndroidRemoteProvisioner");
-        parts.add(Build.BRAND);
+        parts.add("Linux");
+        parts.add("Android " + Build.VERSION.RELEASE);
         parts.add(Build.MODEL);
-        parts.add(Build.TYPE);
-        parts.add(Build.VERSION.INCREMENTAL);
         parts.add(Build.ID);
-        return String.join("/", parts);
+        parts.add(Build.TYPE);
+        return "AndroidRemoteProvisioner (" + String.join("; ", parts) + ")";
     }
 
     private Result retryOrFail() {
