@@ -100,6 +100,7 @@ public class RegistrationProxy {
                     new ComponentName(serviceInfo.applicationInfo.packageName, serviceInfo.name));
             if (!context.bindServiceAsUser(intent, this, Context.BIND_AUTO_CREATE,
                     UserHandle.SYSTEM)) {
+                context.unbindService(this);
                 throw new RemoteException("Failed to bind to IRemoteProvisioning service");
             }
         }

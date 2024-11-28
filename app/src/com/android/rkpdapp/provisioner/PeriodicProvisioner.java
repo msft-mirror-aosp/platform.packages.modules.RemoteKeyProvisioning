@@ -18,6 +18,7 @@ package com.android.rkpdapp.provisioner;
 
 import android.annotation.NonNull;
 import android.content.Context;
+import android.os.Trace;
 import android.util.Log;
 
 import androidx.work.WorkManager;
@@ -83,8 +84,10 @@ public class PeriodicProvisioner extends Worker {
     public Result doWork() {
         sLock.lock();
         try {
+            Trace.beginSection("Periodic.Provisioner");
             return doSynchronizedWork();
         } finally {
+            Trace.endSection();
             sLock.unlock();
         }
     }
