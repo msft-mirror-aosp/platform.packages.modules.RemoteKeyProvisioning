@@ -19,6 +19,7 @@ package com.android.rkpdapp.service;
 import android.content.Context;
 import android.os.IBinder;
 import android.os.RemoteException;
+import android.os.Trace;
 import android.util.Log;
 
 import androidx.annotation.GuardedBy;
@@ -114,7 +115,12 @@ public final class RegistrationBinder extends IRegistration.Stub {
             checkedCallback(callback::onProvisioningNeeded);
             try (ProvisioningAttempt metrics = ProvisioningAttempt.createOutOfKeysAttemptMetrics(
                     mContext, mSystemInterface.getServiceName())) {
-                fetchGeekAndProvisionKeys(metrics);
+                Trace.beginSection("Registration.Binder.fetchGeekAndProvisionKeys");
+                try {
+                    fetchGeekAndProvisionKeys(metrics);
+                } finally {
+                    Trace.endSection();
+                }
             }
             assignedKey = tryToAssignKey(minExpiry, keyId);
         }
@@ -213,8 +219,10 @@ public final class RegistrationBinder extends IRegistration.Stub {
 
     @Override
     public void getKey(int keyId, IGetKeyCallback callback) {
+        Trace.beginSection("Registration.Binder.getKey");
         synchronized (mTasksLock) {
             if (mTasks.containsKey(callback.asBinder())) {
+                Trace.endSection();
                 throw new IllegalArgumentException("Callback " + callback.asBinder().hashCode()
                         + " is already associated with a getKey operation that is in-progress");
             }
@@ -222,6 +230,7 @@ public final class RegistrationBinder extends IRegistration.Stub {
             mTasks.put(callback.asBinder(),
                     mThreadPool.submit(() -> getKeyThreadWorker(keyId, callback)));
         }
+        Trace.endSection();
     }
 
     private void getKeyThreadWorker(int keyId, IGetKeyCallback callback) {
