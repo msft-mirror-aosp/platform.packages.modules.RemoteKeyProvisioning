@@ -22,6 +22,8 @@
         <option name="test-file-name" value="RkpdAppIntegrationTests.apk" />
     </target_preparer>
 
+    <target_preparer class="com.android.tradefed.targetprep.RunOnSystemUserTargetPreparer"/>
+
     <test class="com.android.tradefed.testtype.AndroidJUnitTest" >
         <option name="package" value="com.android.rkpdapp.e2etest" />
         <option name="runner" value="androidx.test.runner.AndroidJUnitRunner" />
