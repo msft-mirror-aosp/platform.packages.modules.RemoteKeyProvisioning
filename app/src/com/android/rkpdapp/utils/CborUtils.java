@@ -16,7 +16,10 @@
 
 package com.android.rkpdapp.utils;
 
+import static android.content.pm.PackageManager.MATCH_APEX;
+
 import android.content.Context;
+import android.content.pm.PackageManager;
 import android.hardware.security.keymint.MacedPublicKey;
 import android.os.Build;
 import android.util.Log;
@@ -270,7 +273,7 @@ public class CborUtils {
      * device configuration values to return. In general, this boils down to if remote provisioning
      * is turned on at all or not.
      *
-     * @return the CBOR encoded provisioning information relevant to the server.
+     * @return the CBOR encoded provisioning information relevant to th.
      */
     public static byte[] buildProvisioningInfo(Context context) {
         try {
@@ -278,14 +281,27 @@ public class CborUtils {
             new CborEncoder(baos).encode(new CborBuilder()
                     .addMap()
                         .put("fingerprint", Build.FINGERPRINT)
-                        .put(new UnicodeString("id"),
-                             new UnsignedInteger(Settings.getId(context)))
+                        .put("id", Settings.getId(context))
+                        .put("version", getPackageVersion(context))
                         .end()
                     .build());
             return baos.toByteArray();
         } catch (CborException e) {
             Log.e(TAG, "CBOR serialization failed.", e);
             return EMPTY_MAP;
+        }
+    }
+
+    private static long getPackageVersion(Context context) {
+        String packageName = context.getPackageName();
+        try {
+            return context
+                .getPackageManager()
+                .getPackageInfo(packageName, MATCH_APEX)
+                .getLongVersionCode();
+        } catch (PackageManager.NameNotFoundException e) {
+            Log.e(TAG, "Error looking up package " + packageName, e);
+            return 0;
         }
     }
 
