@@ -21,13 +21,16 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 
+import android.content.Context;
 import android.os.Build;
 import android.platform.test.annotations.Presubmit;
 
+import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 
 import com.android.rkpdapp.GeekResponse;
 import com.android.rkpdapp.utils.CborUtils;
+import com.android.rkpdapp.utils.Settings;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -43,6 +46,7 @@ import java.util.List;
 import co.nstant.in.cbor.CborBuilder;
 import co.nstant.in.cbor.CborDecoder;
 import co.nstant.in.cbor.CborEncoder;
+import co.nstant.in.cbor.CborException;
 import co.nstant.in.cbor.model.Array;
 import co.nstant.in.cbor.model.ByteString;
 import co.nstant.in.cbor.model.DataItem;
@@ -458,5 +462,24 @@ public class CborUtilsTest {
         assertNotNull("Device info doesn't contain fingerprint", fingerprint);
         assertEquals(MajorType.UNICODE_STRING, fingerprint.getMajorType());
         assertEquals(Build.FINGERPRINT, fingerprint.toString());
+    }
+
+    @Test
+    public void testBuildProvisioningInfo() throws CborException {
+        Context context = ApplicationProvider.getApplicationContext();
+
+        byte[] cbor = CborUtils.buildProvisioningInfo(context);
+        DataItem info = new CborDecoder(new ByteArrayInputStream(cbor)).decode().get(0);
+
+        assertEquals(
+                info,
+                new CborBuilder()
+                    .addMap()
+                        .put("fingerprint", Build.FINGERPRINT)
+                        .put("id", Settings.getId(context))
+                        .put("version", context.getApplicationInfo().compileSdkVersion)
+                        .end()
+                    .build()
+                    .get(0));
     }
 }
